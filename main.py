@@ -83,7 +83,7 @@ class NokPointCloud:
             densities = np.asarray(densities)
 
             print('remove low density vertices')
-            vertices_to_remove = densities < np.quantile(densities, 0.01)
+            vertices_to_remove = densities < np.quantile(densities, 0.025)
             mesh.remove_vertices_by_mask(vertices_to_remove)
             mesh.compute_triangle_normals()
 
@@ -418,6 +418,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.model = QtGui.QStandardItemModel()
         self.treeView.setModel(self.model)
 
+        self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
+
         # clean graphicscene
         # self.viewer.clean_scene()
 
@@ -456,9 +458,11 @@ class SkyStock(QtWidgets.QMainWindow):
             self.viewer.select_point = True
             self.viewer.toggleDragMode()
 
+            self.update_progress(text='Click on a stock!')
+
     def sam_process(self):
         # switch back to hand tool
-        self.hand_pan()
+        self.update_progress(text='Computing...')
 
         interest_point = self.viewer.get_selected_point()
         x = interest_point.x()
@@ -497,7 +501,6 @@ class SkyStock(QtWidgets.QMainWindow):
                 sam_cloud_path = os.path.join(self.current_cloud.processed_data_dir, part_name + '.ply')
                 sam_cloud_path_ref = os.path.join(self.current_cloud.processed_data_dir, part_name + '_large.ply')
 
-
                 print('lets crop this')
                 # convert image coords to point cloud coords
                 new_coords = process.convert_coord_img_to_cloud_topview(coords, self.current_cloud.res,
@@ -530,9 +533,6 @@ class SkyStock(QtWidgets.QMainWindow):
                 with open(volume_text_file) as f:
                     volume_result = f.readline()
 
-
-
-
                 # create new point cloud object
                 self.create_point_cloud_object(sam_cloud_path, part_name, orient=False, ransac=False, mesh=True)
                 self.current_cloud = self.Nokclouds[-1]
@@ -549,14 +549,17 @@ class SkyStock(QtWidgets.QMainWindow):
                 # segm_load = o3d.io.read_point_cloud(sam_cloud_path)
                 # process.basic_vis_creation(segm_load, 'top')
 
+        self.hand_pan()
+
     def go_crop(self):
         if self.actionCrop.isChecked():
             self.viewer.rect = True
             self.viewer.toggleDragMode()
 
+            self.update_progress(text='Draw a box to crop!')
+
     def perform_crop(self):
-        # switch back to hand tool
-        self.hand_pan()
+        self.update_progress(text='Computing...')
 
         # get coordinates and crop cloud
         coords = self.viewer.crop_coords
@@ -604,12 +607,17 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.viewer.clean_scene()
 
+        # switch back to hand tool
+        self.hand_pan()
+
     def hand_pan(self):
         # switch back to hand tool
         self.actionHand_selector.setChecked(True)
         self.viewer.rect = False
         self.viewer.select_point = False
         self.viewer.toggleDragMode()
+
+        self.update_progress(text='Yon can pan the image!')
 
     def go_segment(self):
         """
@@ -647,6 +655,8 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(self.app_dir)
 
         self.create_point_cloud_object(path, 'Original_point_cloud')
+
+        self.update_progress(text='Choose a functionality!')
 
     def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False):
         cloud = NokPointCloud()
