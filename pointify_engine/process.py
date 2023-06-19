@@ -282,7 +282,22 @@ def cc_function(dest_dir, function_name, fun_txt):
     subprocess.call([batpath])
     os.remove(batpath)
 
-def crop_coords(cloud_path, coords):
+def compute_volume_clouds(cloud_path_ceiling, cloud_path_floor):
+    (cloud_folder, cloud_file) = os.path.split(cloud_path_floor)
+    cc_cloud_ceiling = '"' + cloud_path_ceiling + '"'
+    cc_cloud_floor = '"' + cloud_path_floor + '"'
+    function_name = 'volume'
+
+    function = f' -VOLUME -GRID_STEP 0.2'
+
+
+    # Prepare CloudCompare function
+    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
+              cc_cloud_ceiling + ' -O ' + cc_cloud_floor + function
+    cc_function(cloud_folder, function_name, fun_txt)
+
+
+def crop_coords(cloud_path, coords, outside = False):
     (cloud_folder, cloud_file) = os.path.split(cloud_path)
     cc_cloud = '"' + cloud_path + '"'
     function_name = 'crop_complex'
@@ -297,7 +312,9 @@ def crop_coords(cloud_path, coords):
     print(list_coords_txt)
 
 
-    function = f' -CROP2D Z {nb_ver} ' + list_coords_txt + ' -VOLUME -GRID_STEP 0.2'
+    function = f' -CROP2D Z {nb_ver} ' + list_coords_txt
+    if outside:
+        function += ' -OUTSIDE -RASTERIZE -GRID_STEP 0.05 -EMPTY_FILL INTERP -OUTPUT_CLOUD'
 
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
@@ -1342,8 +1359,10 @@ def convert_mask_polygon(image_path, dest_path1, dest_path2):
     polygon = Polygon(contour)
     print('ok buffering polygon')
     buffered_polygon = polygon.buffer(0.2, join_style=2)
+    # large_buffered_polygon = polygon.buffer(0.5, join_style=2)
 
     coords = sh.get_coordinates(buffered_polygon)
+
     print(f'final coords:{coords}')
 
     return buffered_polygon, coords

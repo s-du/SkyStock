@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets, QtGui, QtCore
-from PIL import Image,ImageOps
+from PIL import Image, ImageOps
 import open3d as o3d
+import open3d.visualization.gui as gui
 import numpy as np
 
 import os
@@ -12,11 +13,11 @@ import widgets as wid
 import test2
 
 # PARAMETERS
-POINT_LIM = 1_000_000 # the limit of point above which performing a subsampling operation for advanced computations
-VOXEL_DS = 0.025 # When the point cloud is to dense, this gives the minimum spatial distance to keep between two points
-MIN_RANSAC_FACTOR = 350 # (Total number of points / MIN_RANSAC_FACTOR) gives the minimum amount of points to define a
+POINT_LIM = 1_000_000  # the limit of point above which performing a subsampling operation for advanced computations
+VOXEL_DS = 0.025  # When the point cloud is to dense, this gives the minimum spatial distance to keep between two points
+MIN_RANSAC_FACTOR = 350  # (Total number of points / MIN_RANSAC_FACTOR) gives the minimum amount of points to define a
 # Ransac detection
-RANSAC_DIST = 0.03 # maximum distance for a point to be considered belonging to a plane
+RANSAC_DIST = 0.03  # maximum distance for a point to be considered belonging to a plane
 
 # Floor detection
 BIN_HEIGHT = 0.1
@@ -36,6 +37,7 @@ class NokPointCloud:
         self.path = ''
 
         self.pc_load = None
+        self.mesh_load = None
         self.bound_pc_path = ''
         self.sub_pc_path = ''
         self.folder = ''
@@ -44,6 +46,8 @@ class NokPointCloud:
         self.sub_sampled = False
         self.view_names = []
         self.view_paths = []
+
+        self.poisson_mesh_path = ''
 
         # basic properties
         self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = 0, 0, 0, 0, 0, 0
@@ -60,11 +64,33 @@ class NokPointCloud:
         self.pc_load = o3d.io.read_point_cloud(self.path)
 
         self.bound_pc_path = os.path.join(self.processed_data_dir, "pc_limits.ply")
-        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = process.compute_basic_properties(self.pc_load,
-                                                                                               save_bound_pc=True,
-                                                                                               output_path_bound_pc=self.bound_pc_path)
+        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = process.compute_basic_properties(
+            self.pc_load,
+            save_bound_pc=True,
+            output_path_bound_pc=self.bound_pc_path)
 
         print(f'The point cloud density is: {self.density:.3f}')
+
+    def do_mesh(self):
+        if self.pc_load:
+            self.pc_load.estimate_normals()
+            self.pc_load.orient_normals_consistent_tangent_plane(100)
+            with o3d.utility.VerbosityContextManager(
+                    o3d.utility.VerbosityLevel.Debug) as cm:
+                mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                    self.pc_load, depth=11)
+
+            densities = np.asarray(densities)
+
+            print('remove low density vertices')
+            vertices_to_remove = densities < np.quantile(densities, 0.01)
+            mesh.remove_vertices_by_mask(vertices_to_remove)
+            mesh.compute_triangle_normals()
+
+            self.poisson_mesh_path = os.path.join(self.processed_data_dir, "poisson_mesh.obj")
+
+            o3d.io.write_triangle_mesh(self.poisson_mesh_path, mesh)
+            self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
 
     def standard_images(self):
         self.res = round(self.density * 5, 3) * 1000
@@ -116,7 +142,7 @@ class NokPointCloud:
         if self.ransac_done:
             shutil.rmtree(self.ransac_cloud_folder)
             shutil.rmtree(self.ransac_obj_folder)
-        self.do_ransac(min_factor = 150)
+        self.do_ransac(min_factor=150)
 
         # create pcv version of subsampled cloud
         self.pcv_path = os.path.join(self.processed_data_dir, 'pcv.ply')
@@ -139,11 +165,12 @@ class NokPointCloud:
         plane_list = process.generate_list('obj', self.ransac_obj_folder, exclude='merged')
 
         # find horizontal planes
-        hor_planes = process.find_planes(plane_list, self.ransac_cloud_folder, orientation=orientation, size_absolute = 'area_greater_than')
+        hor_planes = process.find_planes(plane_list, self.ransac_cloud_folder, orientation=orientation,
+                                         size_absolute='area_greater_than')
         hor_planes_loc = hor_planes[2]
 
         # create new_clouds from the detected planes (the original point cloud is segmented around the plane)
-        n_h_elements = process.cc_planes_to_build_dist_list(self.path, hor_planes_loc, h_planes_pc_dir, span = span)
+        n_h_elements = process.cc_planes_to_build_dist_list(self.path, hor_planes_loc, h_planes_pc_dir, span=span)
 
         # computing the properties for each new point cloud --> Useful to place the images on the entire point cloud
         new_pc_list = process.generate_list('.las', h_planes_pc_dir)
@@ -160,18 +187,18 @@ class NokPointCloud:
             plane_rotated_path = process.find_substring('TRANSFORMED', h_planes_pc_dir)
             process.render_plane_in_cloud(plane_rotated_path, self.transf_pcv_path, self.res / 1000)
 
-        i=0
+        i = 0
         for file in os.listdir(self.processed_data_dir):
             if file.endswith('.tif'):
-                new_file = f'location_plane{i+1}'
+                new_file = f'location_plane{i + 1}'
                 os.rename(os.path.join(self.processed_data_dir, file), os.path.join(h_planes_img_dir, new_file))
-                i+=1
-        j=0
+                i += 1
+        j = 0
         for file in os.listdir(h_planes_pc_dir):
             if file.endswith('.tif'):
                 new_file = f'planarity{j + 1}'
                 os.rename(os.path.join(h_planes_pc_dir, file), os.path.join(h_planes_img_dir, new_file))
-                j+=1
+                j += 1
 
         # add renders to list
         for img in os.listdir(h_planes_img_dir):
@@ -192,12 +219,12 @@ class NokPointCloud:
         self.update_dirs()
         self.pc_load = o3d.io.read_point_cloud(self.path)
         self.bound, self.bound_points, self.center, self.dim, _, _ = process.compute_basic_properties(self.pc_load,
-                                                                                               save_bound_pc=True,
-                                                                                               output_path_bound_pc=self.bound_pc_path)
+                                                                                                      save_bound_pc=True,
+                                                                                                      output_path_bound_pc=self.bound_pc_path)
         if self.sub_sampled:
             self.sub_pc_path
 
-    def do_ransac(self, min_factor = MIN_RANSAC_FACTOR):
+    def do_ransac(self, min_factor=MIN_RANSAC_FACTOR):
         self.sub_sampled = False
         # create RANSAC directories
         self.ransac_cloud_folder = os.path.join(self.processed_data_dir, 'RANSAC_pc')
@@ -230,12 +257,9 @@ class NokPointCloud:
         print(f'here are the minimum points {min_points}')
 
         self.n_planes = process.preproc_ransac_short(self.sub_pc_path, min_points, RANSAC_DIST, self.ransac_obj_folder,
-                                                self.ransac_cloud_folder)
+                                                     self.ransac_cloud_folder)
 
         self.ransac_done = True
-
-
-
 
 
 class SelectSegmentResult(QtWidgets.QDialog):
@@ -267,8 +291,6 @@ class SelectSegmentResult(QtWidgets.QDialog):
         self.pushButton_left.clicked.connect(lambda: self.update_img_to_preview('minus'))
         self.pushButton_right.clicked.connect(lambda: self.update_img_to_preview('plus'))
 
-
-
     def update_img_to_preview(self, direction):
         if direction == 'minus':
             self.current_img -= 1
@@ -293,12 +315,13 @@ class SelectSegmentResult(QtWidgets.QDialog):
         else:
             self.pushButton_left.setEnabled(True)
 
+
 class AboutDialog(QtWidgets.QDialog):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle('What is this app about?')
-        self.setFixedSize(300,300)
+        self.setFixedSize(300, 300)
         self.layout = QtWidgets.QVBoxLayout()
 
         about_text = QtWidgets.QLabel('This app was made by Buildwise, to analyze roofs and their deformation.')
@@ -320,6 +343,7 @@ class AboutDialog(QtWidgets.QDialog):
         self.layout.addWidget(logos2, alignment=QtCore.Qt.AlignCenter)
 
         self.setLayout(self.layout)
+
 
 class SkyStock(QtWidgets.QMainWindow):
     """
@@ -426,7 +450,6 @@ class SkyStock(QtWidgets.QMainWindow):
         if dialog.exec_():
             pass
 
-
     def detect_stock(self, stuff_class):
         # Here the SAM model is called
         if self.actionSelectPoint.isChecked():
@@ -445,7 +468,7 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(seg_dir)
         list_img = []
 
-        test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x,y )
+        test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
         for file in os.listdir(seg_dir):
             fileloc = os.path.join(seg_dir, file)
             list_img.append(fileloc)
@@ -472,21 +495,59 @@ class SkyStock(QtWidgets.QMainWindow):
             if ok:
                 part_name = text
                 sam_cloud_path = os.path.join(self.current_cloud.processed_data_dir, part_name + '.ply')
+                sam_cloud_path_ref = os.path.join(self.current_cloud.processed_data_dir, part_name + '_large.ply')
+
 
                 print('lets crop this')
                 # convert image coords to point cloud coords
-                new_coords = process.convert_coord_img_to_cloud_topview(coords, self.current_cloud.res, self.current_cloud.center, self.current_cloud.dim)
+                new_coords = process.convert_coord_img_to_cloud_topview(coords, self.current_cloud.res,
+                                                                        self.current_cloud.center,
+                                                                        self.current_cloud.dim)
                 process.crop_coords(self.current_cloud.path, new_coords)
 
                 src = process.find_substring('CROPPED', self.current_cloud.location_dir)
                 os.rename(src, sam_cloud_path)
 
+                # crop and keep the outside
+                process.crop_coords(self.current_cloud.path, new_coords, outside=True)
+                src = process.find_substring('CROPPED_RASTER', self.current_cloud.location_dir)
+                os.rename(src, sam_cloud_path_ref)
+
+                to_delete = process.find_substring('CROPPED', self.current_cloud.location_dir)
+                os.remove(to_delete)
+
+                """
+                process.crop_coords(self.current_cloud.path, new_coords2)
+                src = process.find_substring('CROPPED', self.current_cloud.location_dir)
+                os.rename(src, sam_cloud_path_ref)
+                """
+
+                # computing the volume
+                process.compute_volume_clouds(sam_cloud_path, sam_cloud_path_ref)
+
+                # get volume
+                volume_text_file = process.find_substring('VolumeCalculationReport', self.current_cloud.processed_data_dir)
+                with open(volume_text_file) as f:
+                    volume_result = f.readline()
+
+
+
+
                 # create new point cloud object
-                self.create_point_cloud_object(sam_cloud_path, part_name, orient=False, ransac=False)
+                self.create_point_cloud_object(sam_cloud_path, part_name, orient=False, ransac=False, mesh=True)
+                self.current_cloud = self.Nokclouds[-1]
 
-                segm_load = o3d.io.read_point_cloud(sam_cloud_path)
-                process.basic_vis_creation(segm_load, 'top')
+                # launch custom viewer
+                app_vis = gui.Application.instance
+                app_vis.initialize()
+                print(self.current_cloud.pc_load)
+                print(self.current_cloud.mesh_load)
 
+                viz = wid.Custom3dView(self.current_cloud.pc_load, self.current_cloud.mesh_load, volume_result)
+                app_vis.run()
+
+                # segm_load = o3d.io.read_point_cloud(sam_cloud_path)
+                # process.basic_vis_creation(segm_load, 'top')
 
     def go_crop(self):
         if self.actionCrop.isChecked():
@@ -499,10 +560,10 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # get coordinates and crop cloud
         coords = self.viewer.crop_coords
-        start_x = int(coords[0].x())*self.current_cloud.res / 1000
-        start_y = int(coords[0].y())*self.current_cloud.res / 1000
-        end_x = int(coords[1].x())*self.current_cloud.res / 1000
-        end_y = int(coords[1].y())*self.current_cloud.res / 1000
+        start_x = int(coords[0].x()) * self.current_cloud.res / 1000
+        start_y = int(coords[0].y()) * self.current_cloud.res / 1000
+        end_x = int(coords[1].x()) * self.current_cloud.res / 1000
+        end_y = int(coords[1].y()) * self.current_cloud.res / 1000
 
         # crop the point cloud
         bound = self.current_cloud.pc_load.get_axis_aligned_bounding_box()
@@ -510,22 +571,22 @@ class SkyStock(QtWidgets.QMainWindow):
         dim = bound.get_extent()
 
         if self.current_view == 'top':
-            pt1 = [center[0] - dim[0]/2 + start_x, center[1] + dim[1]/2 - start_y, center[2] - dim[2] / 2]
-            pt2 = [pt1[0] + (end_x-start_x), pt1[1] - (end_y-start_y), center[2] + dim[2] / 2]
+            pt1 = [center[0] - dim[0] / 2 + start_x, center[1] + dim[1] / 2 - start_y, center[2] - dim[2] / 2]
+            pt2 = [pt1[0] + (end_x - start_x), pt1[1] - (end_y - start_y), center[2] + dim[2] / 2]
             np_points = [pt1, pt2]
             points = o3d.utility.Vector3dVector(np_points)
             orientation = "top"
 
         elif self.current_view == 'front':
             pt1 = [center[0] - dim[0] / 2 + start_x, center[1] - dim[1] / 2, center[2] + dim[2] / 2 - start_y]
-            pt2 = [pt1[0] + (end_x - start_x), center[1] + dim[1] / 2, pt1[2] - (end_y-start_y)]
+            pt2 = [pt1[0] + (end_x - start_x), center[1] + dim[1] / 2, pt1[2] - (end_y - start_y)]
             np_points = [pt1, pt2]
             points = o3d.utility.Vector3dVector(np_points)
             orientation = "front"
 
         elif self.current_view == 'right':
             pt1 = [center[0] - dim[0] / 2, center[1] - dim[1] / 2 + start_x, center[2] + dim[2] / 2 - start_y]
-            pt2 = [center[0] + dim[0] / 2, pt1[1] + (end_x - start_x), pt1[2] - (end_y-start_y)]
+            pt2 = [center[0] + dim[0] / 2, pt1[1] + (end_x - start_x), pt1[2] - (end_y - start_y)]
             np_points = [pt1, pt2]
             points = o3d.utility.Vector3dVector(np_points)
             orientation = "front"
@@ -565,7 +626,7 @@ class SkyStock(QtWidgets.QMainWindow):
         :return:
         """
         try:
-            pc = QtWidgets.QFileDialog.getOpenFileName(self, u"Ouverture de fichiers","", "Point clouds (*.ply *.las)")
+            pc = QtWidgets.QFileDialog.getOpenFileName(self, u"Ouverture de fichiers", "", "Point clouds (*.ply *.las)")
             print(f'the following point cloud will be loaded {pc[0]}')
         except:
             pass
@@ -587,7 +648,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.create_point_cloud_object(path, 'Original_point_cloud')
 
-    def create_point_cloud_object(self, path, name, orient=False, ransac=False):
+    def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False):
         cloud = NokPointCloud()
         self.Nokclouds.append(cloud)  # note: self.Nokclouds[0] is always the original point cloud
 
@@ -602,11 +663,11 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(self.Nokclouds[-1].folder)
         process.new_dir(self.Nokclouds[-1].processed_data_dir)
         process.new_dir(self.Nokclouds[-1].img_dir)
-        self.process_pointcloud(self.Nokclouds[-1], orient=orient, ransac=ransac)
+        self.process_pointcloud(self.Nokclouds[-1], orient=orient, ransac=ransac, mesh=mesh)
 
         # add element to treeview
         self.current_cloud = self.Nokclouds[-1]
-        self.add_item_in_tree(self.model, self.Nokclouds[-1].name) # signal a tree change
+        self.add_item_in_tree(self.model, self.Nokclouds[-1].name)  # signal a tree change
 
         # load image
         self.comboBox.setEnabled(True)
@@ -617,7 +678,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.on_img_combo_change()
 
         nb_pc = len(self.Nokclouds)
-        build_idx = self.model.index(nb_pc-1,0)
+        build_idx = self.model.index(nb_pc - 1, 0)
         self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select)
         self.treeView.expandAll()
 
@@ -625,8 +686,6 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionCrop.setEnabled(True)
         self.actionSelectPoint.setEnabled(True)
         self.actionHand_selector.setEnabled(True)
-
-
 
     def on_tree_change(self):
         print('CHANGED!')
@@ -642,8 +701,7 @@ class SkyStock(QtWidgets.QMainWindow):
                 self.comboBox.clear()
                 self.comboBox.addItems(self.current_cloud.view_names)
 
-
-    def process_pointcloud(self, pc, orient = False, ransac = False):
+    def process_pointcloud(self, pc, orient=False, ransac=False, mesh=False):
         # 1. BASIC DATA ____________________________________________________________________________________________________
         # read full high definition point cloud (using open3d)
         print('Reading the point cloud!')
@@ -658,6 +716,10 @@ class SkyStock(QtWidgets.QMainWindow):
         if orient:
             print('Orienting the point cloud perpendicular to the axes...')
             pc.do_orient()
+
+        # 4. GENERATE MESH
+        if mesh:
+            pc.do_mesh()
 
         # 4. GENERATE BASIC VIEWS_______________________________________________________
         print('Launching RGB render/exterior views creation...')
@@ -678,10 +740,10 @@ class SkyStock(QtWidgets.QMainWindow):
         if self.image_loaded:
             self.viewer.setPhoto(QtGui.QPixmap(img_paths[i]))
 
-
     def add_item_in_tree(self, parent, line):
         item = QtGui.QStandardItem(line)
         parent.appendRow(item)
+
 
 def main(argv=None):
     """
