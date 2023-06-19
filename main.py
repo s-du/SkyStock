@@ -71,6 +71,16 @@ class NokPointCloud:
 
         print(f'The point cloud density is: {self.density:.3f}')
 
+        if self.density < 0.05:  # if to many points --> Subsample
+            sub_pc_path = os.path.join(self.location_dir, 'subsampled.ply')  # path to the subsampled version of the point cloud
+            sub = self.pc_load.voxel_down_sample(0.05)
+            o3d.io.write_point_cloud(sub_pc_path, sub)
+            self.sub_sampled = True
+            self.density = 0.05
+
+            self.path = sub_pc_path
+            self.update_dirs()
+
     def do_mesh(self):
         if self.pc_load:
             self.pc_load.estimate_normals()
@@ -381,6 +391,7 @@ class SkyStock(QtWidgets.QMainWindow):
         # Create model (for the tree structure)
         self.model = QtGui.QStandardItemModel()
         self.treeView.setModel(self.model)
+        self.treeView.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.selmod = self.treeView.selectionModel()
 
         # initialize status
@@ -416,15 +427,8 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # Create model (for the tree structure)
         self.model = QtGui.QStandardItemModel()
-        self.treeView.setModel(self.model)
-
         self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
-
-        # clean graphicscene
-        # self.viewer.clean_scene()
-
-        # clean combobox
-        # self.comboBox_cat.clear()
+        self.treeView.setModel(self.model)
 
     def add_icon(self, img_source, pushButton_object):
         """
@@ -472,7 +476,9 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(seg_dir)
         list_img = []
 
+        print(f'input: {self.current_cloud.view_paths[0]}, {x}, {y}')
         test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+
         for file in os.listdir(seg_dir):
             fileloc = os.path.join(seg_dir, file)
             list_img.append(fileloc)
@@ -619,15 +625,6 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.update_progress(text='Yon can pan the image!')
 
-    def go_segment(self):
-        """
-        Launch the plane segmentation
-        """
-        # create new renders
-        self.config_options()
-        self.current_cloud.planarity_images(self.pl_or, self.span)
-        self.on_tree_change()
-
     def get_pointcloud(self):
         """
         Get the point cloud path from the user
@@ -689,7 +686,9 @@ class SkyStock(QtWidgets.QMainWindow):
 
         nb_pc = len(self.Nokclouds)
         build_idx = self.model.index(nb_pc - 1, 0)
-        self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select)
+        self.selmod.clearSelection()
+
+        self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         self.treeView.expandAll()
 
         # enable action(s)
@@ -753,6 +752,7 @@ class SkyStock(QtWidgets.QMainWindow):
     def add_item_in_tree(self, parent, line):
         item = QtGui.QStandardItem(line)
         parent.appendRow(item)
+        self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
 
 
 def main(argv=None):
