@@ -285,7 +285,7 @@ class SelectSegmentResult(QtWidgets.QDialog):
     def __init__(self, list_img, original_img_path, parent=None):
         QtWidgets.QDialog.__init__(self)
         basepath = os.path.dirname(__file__)
-        basename = 'choose'
+        basename = 'choose_with_reject'
         uifile = os.path.join(basepath, 'ui/%s.ui' % basename)
         wid.loadUi(uifile, self)
 
@@ -304,6 +304,7 @@ class SelectSegmentResult(QtWidgets.QDialog):
         # button actions
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
+
 
     def create_connections(self):
         # Push buttons
@@ -494,11 +495,36 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionSuperSam.setEnabled(True)
 
     def sam_chain(self):
+        """
+        Perform a series of SAM segmentation on each box detected by the YOLO algoritm
+        :return:
+        """
         print(r"lets get serious!")
 
         # take each positive yolo result and perform a SAM segmentation in its middle
-        for el in self.inventory:
-            pass
+        for i,el in enumerate(self.inventory):
+            x1, y1, x2, y2, score, class_id = el
+            # take center of the box
+            x = (x1+x2)/2
+            y = (y1+y2)/2
+
+            seg_dir = os.path.join(self.current_cloud.img_dir, 'segmentation')
+            process.new_dir(seg_dir)
+            list_img = []
+
+            test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+            for file in os.listdir(seg_dir):
+                fileloc = os.path.join(seg_dir, file)
+                list_img.append(fileloc)
+
+            dialog = SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
+            dialog.setWindowTitle(f"Select best output, detected stock n°{i}")
+
+            if dialog.exec_():
+                pass
+
+
+
 
     def detect_stock(self, stuff_class):
         # Here the SAM model is called
