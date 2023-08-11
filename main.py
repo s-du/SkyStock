@@ -455,6 +455,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionSelectPoint.triggered.connect(self.detect_stock)
         self.actionCrop.triggered.connect(self.go_crop)
         self.actionDetect.triggered.connect(self.go_yolo)
+        self.actionSuperSam.triggered.connect(self.sam_chain)
         self.actionInfo.triggered.connect(self.show_info)
 
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
@@ -473,6 +474,8 @@ class SkyStock(QtWidgets.QMainWindow):
         results = model(img)[0]
         count = 1
 
+        self.inventory = []
+
         for result in results.boxes.data.tolist():
             x1, y1, x2, y2, score, class_id = result
             print(x1, y1, x2, y2, score, class_id)
@@ -481,6 +484,9 @@ class SkyStock(QtWidgets.QMainWindow):
                 print('add box to viewer!')
                 # add box to the viewer
                 self.viewer.add_yolo_box(f'stock pile {count}', x1,y1,x2,y2)
+                # add result to inventory
+                self.inventory.append(result)
+
                 # update counter
                 count +=1
 
@@ -488,7 +494,11 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionSuperSam.setEnabled(True)
 
     def sam_chain(self):
-        pass
+        print(r"lets get serious!")
+
+        # take each positive yolo result and perform a SAM segmentation in its middle
+        for el in self.inventory:
+            pass
 
     def detect_stock(self, stuff_class):
         # Here the SAM model is called

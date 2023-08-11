@@ -166,6 +166,9 @@
    <property name="text">
     <string>SelectPoint</string>
    </property>
+   <property name="toolTip">
+    <string>SAM segmentation based on one point</string>
+   </property>
   </action>
   <action name="actionInfo">
    <property name="text">
