@@ -148,6 +148,8 @@
    <addaction name="actionCrop"/>
    <addaction name="separator"/>
    <addaction name="actionSelectPoint"/>
+   <addaction name="actionDetect"/>
+   <addaction name="actionSuperSam"/>
   </widget>
   <action name="actionLoad">
    <property name="text">
@@ -198,6 +200,28 @@
    </property>
    <property name="text">
     <string>ShowData</string>
+   </property>
+  </action>
+  <action name="actionDetect">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Detect</string>
+   </property>
+   <property name="toolTip">
+    <string>Detect stocks with YOLO</string>
+   </property>
+  </action>
+  <action name="actionSuperSam">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>SuperSam</string>
+   </property>
+   <property name="toolTip">
+    <string>Perform SAM on all detected stocks</string>
    </property>
   </action>
  </widget>

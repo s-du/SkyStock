@@ -12,6 +12,14 @@ import resources as res
 import widgets as wid
 import test2
 
+from ultralytics import YOLO
+
+# YOLO parameters
+model_path = res.find('other/last.pt')
+model = YOLO(model_path)  # load a custom model
+threshold = 0.5
+class_name_dict = {0: 'stock_pile', 1: 'vehicle', 2: 'building', 3: 'stock_with_wall', 4: 'in_construction'}
+
 # PARAMETERS
 POINT_LIM = 1_000_000  # the limit of point above which performing a subsampling operation for advanced computations
 VOXEL_DS = 0.025  # When the point cloud is to dense, this gives the minimum spatial distance to keep between two points
@@ -72,7 +80,8 @@ class NokPointCloud:
         print(f'The point cloud density is: {self.density:.3f}')
 
         if self.density < 0.05:  # if to many points --> Subsample
-            sub_pc_path = os.path.join(self.location_dir, 'subsampled.ply')  # path to the subsampled version of the point cloud
+            sub_pc_path = os.path.join(self.location_dir,
+                                       'subsampled.ply')  # path to the subsampled version of the point cloud
             sub = self.pc_load.voxel_down_sample(0.05)
             o3d.io.write_point_cloud(sub_pc_path, sub)
             self.sub_sampled = True
@@ -402,6 +411,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/point.png'), self.actionSelectPoint)
         self.add_icon(res.find('img/crop.png'), self.actionCrop)
         self.add_icon(res.find('img/hand.png'), self.actionHand_selector)
+        self.add_icon(res.find('img/yolo.png'), self.actionDetect)
+        self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
 
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
@@ -443,6 +454,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionLoad.triggered.connect(self.get_pointcloud)
         self.actionSelectPoint.triggered.connect(self.detect_stock)
         self.actionCrop.triggered.connect(self.go_crop)
+        self.actionDetect.triggered.connect(self.go_yolo)
         self.actionInfo.triggered.connect(self.show_info)
 
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
@@ -455,6 +467,28 @@ class SkyStock(QtWidgets.QMainWindow):
         dialog = AboutDialog()
         if dialog.exec_():
             pass
+
+    def go_yolo(self):
+        img = self.current_cloud.view_paths[0]
+        results = model(img)[0]
+        count = 1
+
+        for result in results.boxes.data.tolist():
+            x1, y1, x2, y2, score, class_id = result
+            print(x1, y1, x2, y2, score, class_id)
+
+            if score > threshold and class_id == 0:
+                print('add box to viewer!')
+                # add box to the viewer
+                self.viewer.add_yolo_box(f'stock pile {count}', x1,y1,x2,y2)
+                # update counter
+                count +=1
+
+        # enable super sam
+        self.actionSuperSam.setEnabled(True)
+
+    def sam_chain(self):
+        pass
 
     def detect_stock(self, stuff_class):
         # Here the SAM model is called
@@ -535,7 +569,8 @@ class SkyStock(QtWidgets.QMainWindow):
                 process.compute_volume_clouds(sam_cloud_path, sam_cloud_path_ref)
 
                 # get volume
-                volume_text_file = process.find_substring('VolumeCalculationReport', self.current_cloud.processed_data_dir)
+                volume_text_file = process.find_substring('VolumeCalculationReport',
+                                                          self.current_cloud.processed_data_dir)
                 with open(volume_text_file) as f:
                     volume_result = f.readline()
 
@@ -693,6 +728,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # enable action(s)
         self.actionCrop.setEnabled(True)
+        self.actionDetect.setEnabled(True)
         self.actionSelectPoint.setEnabled(True)
         self.actionHand_selector.setEnabled(True)
 

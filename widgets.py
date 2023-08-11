@@ -258,8 +258,6 @@ class Custom3dView:
         return gui.Widget.EventCallbackResult.IGNORED
 
 
-
-
 def QPixmapFromItem(item):
     """
     Transform a QGraphicsitem into a Pixmap
@@ -380,6 +378,14 @@ class PhotoViewer(QGraphicsView):
         self.pen.setCapStyle(Qt.RoundCap)
         self.pen.setJoinStyle(Qt.RoundJoin)
 
+        self.meas_color = QColor(255, 0, 0, a=255)
+        self.pen_yolo = QPen()
+        # self.pen.setStyle(Qt.DashDotLine)
+        self.pen_yolo.setWidth(2)
+        self.pen_yolo.setColor(self.meas_color)
+        self.pen_yolo.setCapStyle(Qt.RoundCap)
+        self.pen_yolo.setJoinStyle(Qt.RoundJoin)
+
     def has_photo(self):
         return not self._empty
 
@@ -433,7 +439,23 @@ class PhotoViewer(QGraphicsView):
                 self.setDragMode(QGraphicsView.ScrollHandDrag)
 
 
+    def add_yolo_box(self, text, x1, y1, x2, y2):
+        # add box
+        box = QGraphicsRectItem()
+        box.setPen(self.pen_yolo)
 
+        r = QRectF(x1, y1, x2-x1, y2-y1)
+        box.setRect(r)
+
+        # add text
+        text_item = QGraphicsTextItem()
+        text_item.setPos(x1,y1)
+        text_item.setHtml(
+            "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
+
+        # add elements to scene
+        self._scene.addItem(box)
+        self._scene.addItem(text_item)
 
     def get_coord(self, QGraphicsRect):
         rect = QGraphicsRect.rect()
