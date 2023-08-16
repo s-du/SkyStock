@@ -603,7 +603,6 @@ class SkyStock(QtWidgets.QMainWindow):
                 el.mask_rgb = im3
                 el.mask_rgb_cropped = im4
 
-
                 el.coords = coords
                 el.area = area*(self.current_cloud.res/1000)**2
 
@@ -662,24 +661,33 @@ class SkyStock(QtWidgets.QMainWindow):
             process.new_dir(contour_dir)
             dest_path1 = os.path.join(contour_dir, 'contour.jpg')
             dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
+            dest_path3 = os.path.join(contour_dir, 'contour_rgb.jpg')
+            dest_path4 = os.path.join(contour_dir, 'crop_contour_rgb.jpg')
 
             # convert SAM mask to polygon
-            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+            top_view = cv2.imread(self.current_cloud.view_paths[0])
+            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2, dest_path3,
+                                                           dest_path4)
 
             # add infos to stock pile
             im = cv2.imread(dest_path1)
             im2 = cv2.imread(dest_path2)
+            im3 = cv2.imread(dest_path3)
+            im4 = cv2.imread(dest_path4)
 
             # add object
             stock_obj = StockPileObject()
             stock_obj.name = name
             stock_obj.yolo_bbox = yolo_type_bbox
-            self.stocks_inventory.append(stock_obj)
 
             stock_obj.mask = im
             stock_obj.mask_cropped = im2
+            stock_obj.mask_rgb = im3
+            stock_obj.mask_rgb_cropped = im4
             stock_obj.coords = coords
             stock_obj.area = area * (self.current_cloud.res / 1000) ** 2
+
+            self.stocks_inventory.append(stock_obj)
 
         self.hand_pan()
 
