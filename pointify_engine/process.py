@@ -13,7 +13,6 @@ from shapely.geometry import Polygon
 
 import cv2
 
-
 from PySide6 import QtCore, QtGui, QtWidgets
 
 
@@ -93,7 +92,7 @@ class RunnerBasicProp(QtCore.QRunnable):
             dist = self.pc_load.compute_nearest_neighbor_distance()
             density = statistics.mean(dist)
 
-        #return bound, points_bb_np, center, dim, density, n_points
+        # return bound, points_bb_np, center, dim, density, n_points
         self.bound = bound
         self.points_bb_np = points_bb_np
         self.center = center
@@ -282,6 +281,7 @@ def cc_function(dest_dir, function_name, fun_txt):
     subprocess.call([batpath])
     os.remove(batpath)
 
+
 def compute_volume_clouds(cloud_path_ceiling, cloud_path_floor):
     (cloud_folder, cloud_file) = os.path.split(cloud_path_floor)
     cc_cloud_ceiling = '"' + cloud_path_ceiling + '"'
@@ -290,14 +290,13 @@ def compute_volume_clouds(cloud_path_ceiling, cloud_path_floor):
 
     function = f' -VOLUME -GRID_STEP 0.2'
 
-
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
               cc_cloud_ceiling + ' -O ' + cc_cloud_floor + function
     cc_function(cloud_folder, function_name, fun_txt)
 
 
-def crop_coords(cloud_path, coords, outside = False):
+def crop_coords(cloud_path, coords, outside=False):
     (cloud_folder, cloud_file) = os.path.split(cloud_path)
     cc_cloud = '"' + cloud_path + '"'
     function_name = 'crop_complex'
@@ -310,7 +309,6 @@ def crop_coords(cloud_path, coords, outside = False):
         list_coords_txt += (f'{i[0]} {i[1]} ')
 
     print(list_coords_txt)
-
 
     function = f' -CROP2D Z {nb_ver} ' + list_coords_txt
     if outside:
@@ -1277,6 +1275,13 @@ def name_to_matrix(orientation):
     return trans_init, inv_trans
 
 
+"""
+======================================================================================
+2D OPS
+======================================================================================
+"""
+
+
 def basic_vis_creation(load, orientation, p_size=1.5, back_color=[1, 1, 1]):
     """A function that creates the basic environment for creating things with open3D
             @ parameters :
@@ -1311,7 +1316,8 @@ def crop_and_save(image_path):
     y_nonzero, x_nonzero, _ = np.nonzero(image)
     image.crop((np.min(x_nonzero), np.min(y_nonzero), np.max(x_nonzero), np.max(y_nonzero)))
 
-    image.save(image_path[:-4]+'crop.jpg')
+    image.save(image_path[:-4] + 'crop.jpg')
+
 
 def get_nonzero_coord(image_path):
     image = Image.open(image_path)
@@ -1323,8 +1329,9 @@ def get_nonzero_coord(image_path):
 
     return xmin, xmax, ymin, ymax
 
+
 def convert_mask_polygon(image_path, dest_path1, dest_path2):
-    img_folder,_ = os.path.split(image_path)
+    img_folder, _ = os.path.split(image_path)
     img_color = cv2.imread(image_path)
     img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
     img_binary = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
@@ -1351,8 +1358,8 @@ def convert_mask_polygon(image_path, dest_path1, dest_path2):
     contr = cv2.drawContours(contr, [big_contour], 0, (0, 0, 255), 2)
 
     # save result2
-    #cv2.imwrite(dest_path1, result)
-    #cv2.imwrite(dest_path2, result2)
+    cv2.imwrite(dest_path1, result)
+    cv2.imwrite(dest_path2, result2)
 
     print(big_contour)
     contour = np.squeeze(big_contour)
@@ -1381,4 +1388,3 @@ def convert_coord_img_to_cloud_topview(coords, cloud_res, center, dim):
         new_coords.append(new_coord)
 
     return new_coords
-

@@ -14,6 +14,16 @@ import test2
 
 from ultralytics import YOLO
 
+"""
+TODO's
+- Implement progress bar
+- Clear viewer when changing view
+- Create class for each stock pile object
+- Create reporting functions
+    - A giant map with all footprints
+
+"""
+
 # YOLO parameters
 model_path = res.find('other/last.pt')
 model = YOLO(model_path)  # load a custom model
@@ -37,6 +47,13 @@ SPHERE_MAX = 1
 
 # Planar analysis
 SPAN = 0.03
+
+class StockPileObject:
+    def __init__(self):
+        self.name = ''
+        self.yolo_bbox = None
+        self.pc = None
+        self.mask = None
 
 
 class NokPointCloud:
@@ -442,6 +459,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
         self.treeView.setModel(self.model)
 
+        # reset list of stock piles
+
     def add_icon(self, img_source, pushButton_object):
         """
         Function to add an icon to a pushButton
@@ -471,11 +490,15 @@ class SkyStock(QtWidgets.QMainWindow):
             pass
 
     def go_yolo(self):
-        img = self.current_cloud.view_paths[0]
+        """
+        Analyze the current top view of the site, and detect stock piles using YOLO algorithm
+        :return:
+        """
+        img = self.current_cloud.view_paths[0] # the first element is the top view
         results = model(img)[0]
         count = 1
 
-        self.inventory = []
+        self.stocks_inventory = []
 
         for result in results.boxes.data.tolist():
             x1, y1, x2, y2, score, class_id = result
@@ -484,15 +507,24 @@ class SkyStock(QtWidgets.QMainWindow):
             if score > threshold and class_id == 0:
                 print('add box to viewer!')
                 # add box to the viewer
-                self.viewer.add_yolo_box(f'stock pile {count}', x1,y1,x2,y2)
-                # add result to inventory
-                self.inventory.append(result)
+                name = f'stock pile {count}'
+                # self.viewer.add_yolo_box(name, x1,y1,x2,y2)
+
+                # create a new stock pile object
+                stock_obj = StockPileObject()
+                stock_obj.name = name
+                stock_obj.yolo_bbox = result
+                self.stocks_inventory.append(stock_obj)
 
                 # update counter
                 count +=1
 
+        # add current inventory to viewer
+        self.viewer.add_list_boxes(self.stocks_inventory)
+
         # enable super sam
         self.actionSuperSam.setEnabled(True)
+        self.actionDetect.setEnabled(False) # TODO: allow the user to re-run YOLO
 
     def sam_chain(self):
         """
@@ -501,14 +533,14 @@ class SkyStock(QtWidgets.QMainWindow):
         """
         print(r"lets get serious!")
 
-        # take each positive yolo result and perform a SAM segmentation in its middle
-        for i,el in enumerate(self.inventory):
-            x1, y1, x2, y2, score, class_id = el
+        # take each positive yolo result, for each stock pile object, and perform a SAM segmentation in its middle
+        for i,el in enumerate(self.stocks_inventory):
+            x1, y1, x2, y2, score, class_id = el.yolo_bbox
             # take center of the box
             x = (x1+x2)/2
             y = (y1+y2)/2
 
-            seg_dir = os.path.join(self.current_cloud.img_dir, 'segmentation')
+            seg_dir = os.path.join(self.current_cloud.img_dir, 'segmentation') # create a folder to store temporary images
             process.new_dir(seg_dir)
             list_img = []
 
@@ -518,11 +550,38 @@ class SkyStock(QtWidgets.QMainWindow):
                 list_img.append(fileloc)
 
             dialog = SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
-            dialog.setWindowTitle(f"Select best output, detected stock n°{i}")
+            dialog.setWindowTitle(f"Select best output, {el.name}")
 
             if dialog.exec_():
-                pass
+                # the name is required
+                text, ok = QtWidgets.QInputDialog.getText(self, 'input dialog', 'Name of the part')
+                if ok:
+                    el.name = text
 
+                # the inventory element is validated and the mask is added
+                print('good choice!')
+                choice_im = dialog.current_img
+                mask_path = list_img[choice_im]
+                im = Image.open(mask_path)
+                el.mask = im
+
+                contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
+                process.new_dir(contour_dir)
+
+                dest_path1 = os.path.join(contour_dir, 'contour1.jpg')
+                dest_path2 = os.path.join(contour_dir, 'contour2.jpg')
+
+                # convert SAM mask to polygon
+                _, coords = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+
+                # add polygon to viewer
+                self.viewer.add_poly(coords)
+
+            else:
+                self.stocks_inventory.pop(i)
+
+        # redraw stocks
+        self.viewer.add_list_boxes(self.stocks_inventory)
 
 
 
@@ -535,6 +594,10 @@ class SkyStock(QtWidgets.QMainWindow):
             self.update_progress(text='Click on a stock!')
 
     def sam_process(self):
+        """
+        SAM segmentation based on user point selection
+        :return:
+        """
         # switch back to hand tool
         self.update_progress(text='Computing...')
 
@@ -719,7 +782,7 @@ class SkyStock(QtWidgets.QMainWindow):
         original_dir, _ = os.path.split(path)
 
         # create specific folder for the app outputs
-        self.app_dir = os.path.join(original_dir, 'NokOut')
+        self.app_dir = os.path.join(original_dir, 'SkyStock')
         process.new_dir(self.app_dir)
 
         self.create_point_cloud_object(path, 'Original_point_cloud')
@@ -850,7 +913,7 @@ def main(argv=None):
     # create the main window
 
     window = SkyStock()
-    window.show()
+    window.showMaximized()
 
     # run the application if necessary
     if (app):

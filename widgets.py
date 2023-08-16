@@ -378,7 +378,7 @@ class PhotoViewer(QGraphicsView):
         self.pen.setCapStyle(Qt.RoundCap)
         self.pen.setJoinStyle(Qt.RoundJoin)
 
-        self.meas_color = QColor(255, 0, 0, a=255)
+        self.meas_color = QColor(0, 100, 255, a=255)
         self.pen_yolo = QPen()
         # self.pen.setStyle(Qt.DashDotLine)
         self.pen_yolo.setWidth(2)
@@ -416,6 +416,8 @@ class PhotoViewer(QGraphicsView):
             print(type(item))
             if isinstance(item, QGraphicsRectItem):
                 self._scene.removeItem(item)
+            elif isinstance(item, QGraphicsTextItem):
+                self._scene.removeItem(item)
 
     def setPhoto(self, pixmap=None):
         self._zoom = 0
@@ -439,6 +441,20 @@ class PhotoViewer(QGraphicsView):
                 self.setDragMode(QGraphicsView.ScrollHandDrag)
 
 
+    def add_poly(self, coordinates):
+        # Create a QPolygonF from the coordinates
+        polygon = QPolygonF()
+        for x, y in coordinates:
+            polygon.append(QPointF(x, y))
+
+        # Create a QGraphicsPolygonItem and set its polygon
+        polygon_item = QGraphicsPolygonItem(polygon)
+        fill_color = QColor(0, 255, 255, 100)
+        polygon_item.setBrush(fill_color)  # Set fill color
+
+        # Add the QGraphicsPolygonItem to the scene
+        self._scene.addItem(polygon_item)
+
     def add_yolo_box(self, text, x1, y1, x2, y2):
         # add box
         box = QGraphicsRectItem()
@@ -456,6 +472,33 @@ class PhotoViewer(QGraphicsView):
         # add elements to scene
         self._scene.addItem(box)
         self._scene.addItem(text_item)
+
+    def add_list_boxes(self, list_objects, clear = True):
+        if clear:
+            self.clean_scene()
+
+        for el in list_objects:
+            x1, y1, x2, y2, score, class_id = el.yolo_bbox
+            text = el.name
+
+            print(f'adding {text} to viewer')
+
+            # add box
+            box = QGraphicsRectItem()
+            box.setPen(self.pen_yolo)
+
+            r = QRectF(x1, y1, x2 - x1, y2 - y1)
+            box.setRect(r)
+
+            # add text
+            text_item = QGraphicsTextItem()
+            text_item.setPos(x1, y1)
+            text_item.setHtml(
+                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
+
+            # add elements to scene
+            self._scene.addItem(box)
+            self._scene.addItem(text_item)
 
     def get_coord(self, QGraphicsRect):
         rect = QGraphicsRect.rect()
