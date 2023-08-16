@@ -157,6 +157,34 @@
             </widget>
            </item>
            <item>
+            <widget class="QPushButton" name="pushButton_show_infos">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="minimumSize">
+              <size>
+               <width>32</width>
+               <height>32</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>32</width>
+               <height>32</height>
+              </size>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
             <spacer name="horizontalSpacer">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
@@ -207,6 +235,9 @@
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QToolBar" name="toolBar">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
    <property name="windowTitle">
     <string>toolBar</string>
    </property>
@@ -229,6 +260,8 @@
    <addaction name="actionSelectPoint"/>
    <addaction name="actionDetect"/>
    <addaction name="actionSuperSam"/>
+   <addaction name="separator"/>
+   <addaction name="actionShowInventory"/>
   </widget>
   <action name="actionLoad">
    <property name="text">
@@ -304,6 +337,14 @@
    </property>
    <property name="toolTip">
     <string>Perform SAM on all detected stocks</string>
+   </property>
+  </action>
+  <action name="actionShowInventory">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>ShowInventory</string>
    </property>
   </action>
  </widget>

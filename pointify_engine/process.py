@@ -1371,7 +1371,9 @@ def convert_mask_polygon(image_path, dest_poly_path, dest_crop_poly_path):
     # compute area (in pixels squared)
     area = count_black_pixels(cropped_poly)
 
-    return coords, area
+    yolo_type_bbox = [x,y,x+w,y+h, 0, 0]
+
+    return coords, area, yolo_type_bbox
 
 
 def convert_mask_polygon_old(image_path, dest_path1, dest_path2):
@@ -1456,3 +1458,33 @@ def count_black_pixels(image):
                 black_pixel_count += 1
 
     return black_pixel_count
+
+def generate_summary_canva(image_list, name_list, dest_path):
+    # Sort images based on pixel area
+    sorted_images_and_names = sorted(zip(image_list, name_list), key=lambda x: np.sum(x[0] == 0))
+
+    # Calculate total width and maximum height for the inventory picture
+    total_width = sum(img.shape[1] for img, _ in sorted_images_and_names)
+    max_height = max(img.shape[0] + 30 for img, _ in sorted_images_and_names)
+
+    # Create a blank canvas for the inventory picture
+    inventory_picture = np.ones((max_height, total_width, 3), dtype=np.uint8) * 255  # White background
+    current_x = 0
+
+    # Place each image on the inventory picture along with its name
+    for img, name in sorted_images_and_names:
+        h, w = img.shape[:2]
+        inventory_picture[:h, current_x:current_x + w] = img
+
+        # Write the image name below the image
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        font_color = (0, 0, 0)  # Black text color
+        text_size = cv2.getTextSize(name, font, font_scale, 1)[0]
+        text_x = current_x + (w - text_size[0]) // 2
+        text_y = h + text_size[1] + 10  # Some padding below the image
+        cv2.putText(inventory_picture, name, (text_x, text_y), font, font_scale, font_color, 1, cv2.LINE_AA)
+
+        current_x += w
+
+    cv2.imwrite(dest_path, inventory_picture)

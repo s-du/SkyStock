@@ -508,7 +508,7 @@ class PhotoViewer(QGraphicsView):
             # Add the QGraphicsPolygonItem to the scene
             self._scene.addItem(polygon_item)
 
-    def add_list_infos(self, list_objects):
+    def add_list_infos(self, list_objects, only_name = False):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             text = el.name
@@ -522,14 +522,18 @@ class PhotoViewer(QGraphicsView):
             text_item.setHtml(
                 "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
 
-            # add text 2
-            text_item2 = QGraphicsTextItem()
-            text_item2.setPos(x1, y2)
-            text_item2.setHtml(
-                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + " m²</div>")
-
             self._scene.addItem(text_item)
-            self._scene.addItem(text_item2)
+
+            if not only_name:
+                # add text 2
+                text_item2 = QGraphicsTextItem()
+                text_item2.setPos(x1, y2)
+                text_item2.setHtml(
+                    "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + " m²</div>")
+                self._scene.addItem(text_item2)
+
+
+
 
     def add_list_boxes(self, list_objects):
         for el in list_objects:

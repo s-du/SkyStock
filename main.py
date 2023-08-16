@@ -1,5 +1,6 @@
 from PySide6 import QtWidgets, QtGui, QtCore
 from PIL import Image, ImageOps
+import cv2
 import open3d as o3d
 import open3d.visualization.gui as gui
 import numpy as np
@@ -428,15 +429,17 @@ class SkyStock(QtWidgets.QMainWindow):
         self.update_progress(nb=100, text="Status: Choose point cloud!")
 
         # Add icons to buttons
-        self.add_icon(res.find('img/load.png'), self.actionLoad)
+        self.add_icon(res.find('img/cloud.png'), self.actionLoad)
         self.add_icon(res.find('img/point.png'), self.actionSelectPoint)
         self.add_icon(res.find('img/crop.png'), self.actionCrop)
         self.add_icon(res.find('img/hand.png'), self.actionHand_selector)
         self.add_icon(res.find('img/yolo.png'), self.actionDetect)
         self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
+        self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
 
         self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
         self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
+        self.add_icon(res.find('img/data.png'), self.pushButton_show_infos)
 
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
@@ -483,14 +486,16 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionDetect.triggered.connect(self.go_yolo)
         self.actionSuperSam.triggered.connect(self.sam_chain)
         self.actionInfo.triggered.connect(self.show_info)
+        self.actionShowInventory.triggered.connect(self.inventory_canva)
 
-        # buttons
+        # toggle buttons
         self.pushButton_show_poly.clicked.connect(self.toggle_poly)
         self.pushButton_show_bbox.clicked.connect(self.toggle_bboxes)
+        self.pushButton_show_infos.clicked.connect(self.toggle_infos)
 
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
         self.viewer.endDrawing_rect.connect(self.perform_crop)
-        self.viewer.end_point_selection.connect(self.sam_process)
+        self.viewer.end_point_selection.connect(self.add_single_sam)
 
         self.selmod.selectionChanged.connect(self.on_tree_change)
 
@@ -531,6 +536,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # add current inventory to viewer
         self.viewer.add_list_boxes(self.stocks_inventory)
+        self.viewer.add_list_infos(self.stocks_inventory, only_name=True)
 
         # enable super sam
         self.actionSuperSam.setEnabled(True)
@@ -580,11 +586,11 @@ class SkyStock(QtWidgets.QMainWindow):
                 dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
 
                 # convert SAM mask to polygon
-                coords, area = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+                coords, area, _ = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
 
                 # add infos to stock pile
-                im = Image.open(dest_path1)
-                im2 = Image.open(dest_path2)
+                im = cv2.imread(dest_path1)
+                im2 = cv2.imread(dest_path2)
                 el.mask = im
                 el.mask_cropped = im2
                 el.coords = coords
@@ -604,12 +610,91 @@ class SkyStock(QtWidgets.QMainWindow):
         # enabled viewers buttons
         self.pushButton_show_poly.setEnabled(True)
         self.pushButton_show_bbox.setEnabled(True)
+        self.pushButton_show_infos.setEnabled(True)
+
+        self.actionShowInventory.setEnabled(True)
+
+    def add_single_sam(self):
+        # switch back to hand tool
+        self.update_progress(text='Computing...')
+
+        interest_point = self.viewer.get_selected_point()
+        x = interest_point.x()
+        y = interest_point.y()
+
+        seg_dir = os.path.join(self.current_cloud.img_dir, 'segmentation')
+        process.new_dir(seg_dir)
+        list_img = []
+
+        print(f'input: {self.current_cloud.view_paths[0]}, {x}, {y}')
+        test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+
+        for file in os.listdir(seg_dir):
+            fileloc = os.path.join(seg_dir, file)
+            list_img.append(fileloc)
+
+        dialog = SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
+        dialog.setWindowTitle("Select best output")
+
+        if dialog.exec_():
+            text, ok = QtWidgets.QInputDialog.getText(self, 'input dialog', 'Name of the part')
+            if ok:
+                name = text
+            else:
+                name = f'Stock pile {len(self.stocks_inventory)}'
+
+            print('good choice!')
+            choice_im = dialog.current_img
+            mask_path = list_img[choice_im]
+
+            contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
+            process.new_dir(contour_dir)
+            dest_path1 = os.path.join(contour_dir, 'contour.jpg')
+            dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
+
+            # convert SAM mask to polygon
+            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+
+            # add infos to stock pile
+            im = cv2.imread(dest_path1)
+            im2 = cv2.imread(dest_path2)
+
+            # add object
+            stock_obj = StockPileObject()
+            stock_obj.name = name
+            stock_obj.yolo_bbox = yolo_type_bbox
+            self.stocks_inventory.append(stock_obj)
+
+            stock_obj.mask = im
+            stock_obj.mask_cropped = im2
+            stock_obj.coords = coords
+            stock_obj.area = area * (self.current_cloud.res / 1000) ** 2
+
+        self.hand_pan()
+
+        self.viewer.clean_scene()
+
+        self.viewer.add_list_infos(self.stocks_inventory)
+        self.viewer.add_list_boxes(self.stocks_inventory)
+        self.viewer.add_list_poly(self.stocks_inventory)
+
+        # enabled viewers buttons
+        self.pushButton_show_poly.setChecked(True)
+        self.pushButton_show_bbox.setChecked(True)
+        self.pushButton_show_infos.setChecked(True)
+
+
+    def toggle_infos(self):
+        if not self.pushButton_show_infos.isChecked():
+            self.viewer.clean_scene_text()
+        else:
+            self.viewer.add_list_infos(self.stocks_inventory)
 
     def toggle_bboxes(self):
         if not self.pushButton_show_bbox.isChecked():
-            self.viewer.clean_scene_rectange()
+            self.viewer.clean_scene_rectangle()
         else:
-            self.viewer.add_list_boxes(self.stocks_inventory, clear=False)
+            self.viewer.add_list_boxes(self.stocks_inventory)
 
     def toggle_poly(self):
         if not self.pushButton_show_poly.isChecked():
@@ -625,7 +710,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
             self.update_progress(text='Click on a stock!')
 
-    def sam_process(self):
+    def sam_process_old(self):
         """
         SAM segmentation based on user point selection
         :return:
@@ -722,6 +807,20 @@ class SkyStock(QtWidgets.QMainWindow):
                 # process.basic_vis_creation(segm_load, 'top')
 
         self.hand_pan()
+
+
+    def inventory_canva(self):
+        image_list = []
+        name_list = []
+        for el in self.stocks_inventory:
+            image_list.append(el.mask_cropped)
+            name_list.append(el.name)
+
+        inventory_dir = os.path.join(self.current_cloud.img_dir, 'inventory')
+        process.new_dir(inventory_dir)
+        dest_path = os.path.join(inventory_dir, 'bw_inventory.jpg')
+
+        process.generate_summary_canva(image_list, name_list, dest_path)
 
     def go_crop(self):
         if self.actionCrop.isChecked():
