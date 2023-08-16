@@ -54,6 +54,9 @@ class StockPileObject:
         self.yolo_bbox = None
         self.pc = None
         self.mask = None
+        self.mask_cropped = None
+        self.coords = None
+        self.area = 0
 
 
 class NokPointCloud:
@@ -432,6 +435,9 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/yolo.png'), self.actionDetect)
         self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
 
+        self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
+        self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
+
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
 
@@ -477,6 +483,10 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionDetect.triggered.connect(self.go_yolo)
         self.actionSuperSam.triggered.connect(self.sam_chain)
         self.actionInfo.triggered.connect(self.show_info)
+
+        # buttons
+        self.pushButton_show_poly.clicked.connect(self.toggle_poly)
+        self.pushButton_show_bbox.clicked.connect(self.toggle_bboxes)
 
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
         self.viewer.endDrawing_rect.connect(self.perform_crop)
@@ -532,9 +542,10 @@ class SkyStock(QtWidgets.QMainWindow):
         :return:
         """
         print(r"lets get serious!")
+        to_pop = []
 
         # take each positive yolo result, for each stock pile object, and perform a SAM segmentation in its middle
-        for i,el in enumerate(self.stocks_inventory):
+        for i, el in enumerate(self.stocks_inventory):
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             # take center of the box
             x = (x1+x2)/2
@@ -562,28 +573,49 @@ class SkyStock(QtWidgets.QMainWindow):
                 print('good choice!')
                 choice_im = dialog.current_img
                 mask_path = list_img[choice_im]
-                im = Image.open(mask_path)
-                el.mask = im
 
                 contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
                 process.new_dir(contour_dir)
-
-                dest_path1 = os.path.join(contour_dir, 'contour1.jpg')
-                dest_path2 = os.path.join(contour_dir, 'contour2.jpg')
+                dest_path1 = os.path.join(contour_dir, 'contour.jpg')
+                dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
 
                 # convert SAM mask to polygon
-                coords = process.convert_mask_polygon(mask_path)
+                coords, area = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
 
-                # add polygon to viewer
-                self.viewer.add_poly(coords)
+                # add infos to stock pile
+                im = Image.open(dest_path1)
+                im2 = Image.open(dest_path2)
+                el.mask = im
+                el.mask_cropped = im2
+                el.coords = coords
+                el.area = area*(self.current_cloud.res/1000)**2
 
             else:
-                self.stocks_inventory.pop(i)
+                to_pop.append(i)
 
         # redraw stocks
+        process.delete_elements_by_indexes(self.stocks_inventory, to_pop)
+
+        self.viewer.clean_scene()
+        self.viewer.add_list_infos(self.stocks_inventory)
         self.viewer.add_list_boxes(self.stocks_inventory)
+        self.viewer.add_list_poly(self.stocks_inventory)
 
+        # enabled viewers buttons
+        self.pushButton_show_poly.setEnabled(True)
+        self.pushButton_show_bbox.setEnabled(True)
 
+    def toggle_bboxes(self):
+        if not self.pushButton_show_bbox.isChecked():
+            self.viewer.clean_scene_rectange()
+        else:
+            self.viewer.add_list_boxes(self.stocks_inventory, clear=False)
+
+    def toggle_poly(self):
+        if not self.pushButton_show_poly.isChecked():
+            self.viewer.clean_scene_poly()
+        else:
+            self.viewer.add_list_poly(self.stocks_inventory)
 
     def detect_stock(self, stuff_class):
         # Here the SAM model is called

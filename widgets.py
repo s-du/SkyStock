@@ -418,6 +418,26 @@ class PhotoViewer(QGraphicsView):
                 self._scene.removeItem(item)
             elif isinstance(item, QGraphicsTextItem):
                 self._scene.removeItem(item)
+            elif isinstance(item, QGraphicsPolygonItem):
+                self._scene.removeItem(item)
+
+    def clean_scene_rectangle(self):
+        for item in self._scene.items():
+            print(type(item))
+            if isinstance(item, QGraphicsRectItem):
+                self._scene.removeItem(item)
+
+    def clean_scene_poly(self):
+        for item in self._scene.items():
+            print(type(item))
+            if isinstance(item, QGraphicsPolygonItem):
+                self._scene.removeItem(item)
+
+    def clean_scene_text(self):
+        for item in self._scene.items():
+            print(type(item))
+            if isinstance(item, QGraphicsTextItem):
+                self._scene.removeItem(item)
 
     def setPhoto(self, pixmap=None):
         self._zoom = 0
@@ -473,15 +493,47 @@ class PhotoViewer(QGraphicsView):
         self._scene.addItem(box)
         self._scene.addItem(text_item)
 
-    def add_list_boxes(self, list_objects, clear = True):
-        if clear:
-            self.clean_scene()
+    def add_list_poly(self, list_objects):
+        for el in list_objects:
+            # Create a QPolygonF from the coordinates
+            polygon = QPolygonF()
+            for x, y in el.coords:
+                polygon.append(QPointF(x, y))
 
+            # Create a QGraphicsPolygonItem and set its polygon
+            polygon_item = QGraphicsPolygonItem(polygon)
+            fill_color = QColor(0, 255, 255, 100)
+            polygon_item.setBrush(fill_color)  # Set fill color
+
+            # Add the QGraphicsPolygonItem to the scene
+            self._scene.addItem(polygon_item)
+
+    def add_list_infos(self, list_objects):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             text = el.name
+            text2 = str(el.area)
 
             print(f'adding {text} to viewer')
+
+            # add text 1
+            text_item = QGraphicsTextItem()
+            text_item.setPos(x1, y1)
+            text_item.setHtml(
+                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
+
+            # add text 2
+            text_item2 = QGraphicsTextItem()
+            text_item2.setPos(x1, y2)
+            text_item2.setHtml(
+                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + " m²</div>")
+
+            self._scene.addItem(text_item)
+            self._scene.addItem(text_item2)
+
+    def add_list_boxes(self, list_objects):
+        for el in list_objects:
+            x1, y1, x2, y2, score, class_id = el.yolo_bbox
 
             # add box
             box = QGraphicsRectItem()
@@ -490,15 +542,9 @@ class PhotoViewer(QGraphicsView):
             r = QRectF(x1, y1, x2 - x1, y2 - y1)
             box.setRect(r)
 
-            # add text
-            text_item = QGraphicsTextItem()
-            text_item.setPos(x1, y1)
-            text_item.setHtml(
-                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
-
             # add elements to scene
             self._scene.addItem(box)
-            self._scene.addItem(text_item)
+
 
     def get_coord(self, QGraphicsRect):
         rect = QGraphicsRect.rect()

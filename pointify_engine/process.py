@@ -1330,7 +1330,7 @@ def get_nonzero_coord(image_path):
     return xmin, xmax, ymin, ymax
 
 
-def convert_mask_polygon(image_path):
+def convert_mask_polygon(image_path, dest_poly_path, dest_crop_poly_path):
     mask_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     img_binary = cv2.threshold(mask_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     contours, _ = cv2.findContours(img_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1346,9 +1346,32 @@ def convert_mask_polygon(image_path):
 
     coords = sh.get_coordinates(buffered_polygon)
 
-    return coords
+    # create a white image with the detected shape as black
+    output_image = np.ones_like(mask_image) * 255
+    filled_poly = cv2.drawContours(output_image, [largest_contour], -1, 0, thickness=cv2.FILLED)
 
+    # create a crop version
 
+    # Find the bounding box of the filled contour
+    x, y, w, h = cv2.boundingRect(largest_contour)
+
+    # Add a 10-pixel margin around the bounding box
+    margin = 10
+    x -= margin
+    y -= margin
+    w += 2 * margin
+    h += 2 * margin
+
+    # Crop the image to the bounding box with the margin
+    cropped_poly = output_image[y:y + h, x:x + w]
+
+    cv2.imwrite(dest_poly_path, filled_poly)
+    cv2.imwrite(dest_crop_poly_path, cropped_poly)
+
+    # compute area (in pixels squared)
+    area = count_black_pixels(cropped_poly)
+
+    return coords, area
 
 
 def convert_mask_polygon_old(image_path, dest_path1, dest_path2):
@@ -1409,3 +1432,27 @@ def convert_coord_img_to_cloud_topview(coords, cloud_res, center, dim):
         new_coords.append(new_coord)
 
     return new_coords
+
+
+def delete_elements_by_indexes(original_list, indexes_to_delete):
+    # Sort the indexes in descending order to avoid index shifting during deletion
+    indexes_to_delete.sort(reverse=True)
+
+    for index in indexes_to_delete:
+        if 0 <= index < len(original_list):
+            del original_list[index]
+
+
+def count_black_pixels(image):
+    # Define the black color range (since we're using grayscale, black pixels have intensity 0)
+    black_lower = 0
+    black_upper = 10  # Allow a small range to account for noise
+
+    # Count the black pixels
+    black_pixel_count = 0
+    for row in image:
+        for pixel_value in row:
+            if black_lower <= pixel_value <= black_upper:
+                black_pixel_count += 1
+
+    return black_pixel_count

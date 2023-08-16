@@ -96,6 +96,9 @@
           <layout class="QHBoxLayout" name="horizontalLayout_3">
            <item>
             <widget class="QPushButton" name="pushButton_show_bbox">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
              <property name="minimumSize">
               <size>
                <width>32</width>
@@ -108,8 +111,11 @@
                <height>32</height>
               </size>
              </property>
+             <property name="toolTip">
+              <string>Show/Hide bboxes around stock piles</string>
+             </property>
              <property name="text">
-              <string>Bboxes</string>
+              <string/>
              </property>
              <property name="checkable">
               <bool>true</bool>
@@ -121,6 +127,9 @@
            </item>
            <item>
             <widget class="QPushButton" name="pushButton_show_poly">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
              <property name="minimumSize">
               <size>
                <width>32</width>
@@ -133,8 +142,17 @@
                <height>32</height>
               </size>
              </property>
+             <property name="toolTip">
+              <string>Show/Hide polygons around stock piles</string>
+             </property>
              <property name="text">
-              <string>Polyg</string>
+              <string/>
+             </property>
+             <property name="checkable">
+              <bool>true</bool>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
              </property>
             </widget>
            </item>
