@@ -55,7 +55,9 @@ class StockPileObject:
         self.yolo_bbox = None
         self.pc = None
         self.mask = None
+        self.mask_rgb = None
         self.mask_cropped = None
+        self.mask_rgb_cropped = None
         self.coords = None
         self.area = 0
 
@@ -433,7 +435,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/point.png'), self.actionSelectPoint)
         self.add_icon(res.find('img/crop.png'), self.actionCrop)
         self.add_icon(res.find('img/hand.png'), self.actionHand_selector)
-        self.add_icon(res.find('img/yolo.png'), self.actionDetect)
+        self.add_icon(res.find('img/yolo2.png'), self.actionDetect)
         self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
         self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
 
@@ -584,15 +586,24 @@ class SkyStock(QtWidgets.QMainWindow):
                 process.new_dir(contour_dir)
                 dest_path1 = os.path.join(contour_dir, 'contour.jpg')
                 dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
+                dest_path3 = os.path.join(contour_dir, 'contour_rgb.jpg')
+                dest_path4 = os.path.join(contour_dir, 'crop_contour_rgb.jpg')
 
                 # convert SAM mask to polygon
-                coords, area, _ = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+                top_view = cv2.imread(self.current_cloud.view_paths[0])
+                coords, area, _ = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2, dest_path3, dest_path4)
 
                 # add infos to stock pile
                 im = cv2.imread(dest_path1)
                 im2 = cv2.imread(dest_path2)
+                im3 = cv2.imread(dest_path3)
+                im4 = cv2.imread(dest_path4)
                 el.mask = im
                 el.mask_cropped = im2
+                el.mask_rgb = im3
+                el.mask_rgb_cropped = im4
+
+
                 el.coords = coords
                 el.area = area*(self.current_cloud.res/1000)**2
 

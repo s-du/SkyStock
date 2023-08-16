@@ -1329,8 +1329,22 @@ def get_nonzero_coord(image_path):
 
     return xmin, xmax, ymin, ymax
 
+def mask_image_with_shape(original_img, mask_img):
+    result_image = np.ones_like(original_img) * 255
 
-def convert_mask_polygon(image_path, dest_poly_path, dest_crop_poly_path):
+    # Define the tolerance range
+    tolerance_lower = 0
+    tolerance_upper = 10
+
+    # Create a binary mask based on the tolerance range
+    interest_mask = cv2.inRange(mask_img, tolerance_lower, tolerance_upper)
+
+    # Copy the interest region from the color image to the result image
+    result_image[interest_mask == 255] = original_img[interest_mask == 255]
+
+    return result_image
+
+def convert_mask_polygon(image_path, original_rgb, dest_poly_path, dest_crop_poly_path, dest_poly_rgb_path, dest_poly_rgb_crop_path):
     mask_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     img_binary = cv2.threshold(mask_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     contours, _ = cv2.findContours(img_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -1350,7 +1364,7 @@ def convert_mask_polygon(image_path, dest_poly_path, dest_crop_poly_path):
     output_image = np.ones_like(mask_image) * 255
     filled_poly = cv2.drawContours(output_image, [largest_contour], -1, 0, thickness=cv2.FILLED)
 
-    # create a crop version
+    filled_rgb_poly = mask_image_with_shape(original_rgb, filled_poly)
 
     # Find the bounding box of the filled contour
     x, y, w, h = cv2.boundingRect(largest_contour)
@@ -1364,9 +1378,12 @@ def convert_mask_polygon(image_path, dest_poly_path, dest_crop_poly_path):
 
     # Crop the image to the bounding box with the margin
     cropped_poly = output_image[y:y + h, x:x + w]
+    cropped_rgb_poly = filled_rgb_poly[y:y + h, x:x + w]
 
     cv2.imwrite(dest_poly_path, filled_poly)
     cv2.imwrite(dest_crop_poly_path, cropped_poly)
+    cv2.imwrite(dest_poly_rgb_path, filled_rgb_poly)
+    cv2.imwrite(dest_poly_rgb_crop_path, cropped_rgb_poly)
 
     # compute area (in pixels squared)
     area = count_black_pixels(cropped_poly)
