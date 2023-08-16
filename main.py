@@ -572,7 +572,7 @@ class SkyStock(QtWidgets.QMainWindow):
                 dest_path2 = os.path.join(contour_dir, 'contour2.jpg')
 
                 # convert SAM mask to polygon
-                _, coords = process.convert_mask_polygon(mask_path, dest_path1, dest_path2)
+                coords = process.convert_mask_polygon(mask_path)
 
                 # add polygon to viewer
                 self.viewer.add_poly(coords)

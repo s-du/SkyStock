@@ -1330,7 +1330,28 @@ def get_nonzero_coord(image_path):
     return xmin, xmax, ymin, ymax
 
 
-def convert_mask_polygon(image_path, dest_path1, dest_path2):
+def convert_mask_polygon(image_path):
+    mask_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    img_binary = cv2.threshold(mask_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    contours, _ = cv2.findContours(img_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Select the largest contour (assuming it's the main object)
+    largest_contour = max(contours, key=cv2.contourArea)
+    contour = np.squeeze(largest_contour)
+
+    polygon = Polygon(contour)
+    print('ok buffering polygon')
+    buffered_polygon = polygon.buffer(0.2, join_style=2)
+    # large_buffered_polygon = polygon.buffer(0.5, join_style=2)
+
+    coords = sh.get_coordinates(buffered_polygon)
+
+    return coords
+
+
+
+
+def convert_mask_polygon_old(image_path, dest_path1, dest_path2):
     img_folder, _ = os.path.split(image_path)
     img_color = cv2.imread(image_path)
     img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
