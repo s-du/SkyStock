@@ -1,19 +1,24 @@
-import statistics
+import cv2
+import earthpy.spatial as es
+import math
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+
 import numpy as np
 import open3d as o3d
 import os
-import subprocess
-import math
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
-from PIL import Image
+import rasterio as rio
 import shapely as sh
+import statistics
+import subprocess
+
 from shapely.geometry import Polygon
-
-import cv2
-
+from PIL import Image
 from PySide6 import QtCore, QtGui, QtWidgets
+from scipy.signal import find_peaks
+
+cc_path = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
 
 
 class RunnerSignals(QtCore.QObject):
@@ -101,39 +106,11 @@ class RunnerBasicProp(QtCore.QRunnable):
         self.n_points = n_points
 
 
-# PATHS FUNCTIONS_______________________________________________________________________________________________________
-cc_path = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
-
-
-def generate_list(file_format, dir, exclude='text_to_exclude', include=''):
-    """
-    Function that generates the list of file with a specific extension in a folder
-    :param file_format: (str) the extension to look for
-    :param dir: (str) the folder to look into
-    :param exclude: (str) an optional parameter to exclude files that include some text in their name
-    :param include: (str) an optional parameter to specifically include files with some text in their name
-    :return: (list) the list of detected files
-    """
-    file_list = []
-    for file in os.listdir(dir):
-        fileloc = os.path.join(dir, file)
-        if file.endswith(file_format):
-            if exclude not in file:
-                if include in file:
-                    file_list.append(fileloc)
-    return file_list
-
-
-def new_dir(dir_path):
-    """
-    Simple function to verify if a directory exists and if not creating it
-    :param dir_path: (str) the path to check
-    :return:
-    """
-    if not os.path.exists(dir_path):
-        os.mkdir(dir_path)
-
-
+"""
+======================================================================================
+PATH FUNCTIONS
+======================================================================================
+"""
 def find_substring(substring, folder):
     """
     Function that finds a file with a specific substring in a folder, and return its path
@@ -169,7 +146,69 @@ def find_substring_delete(substring, folder):
             os.remove(os.path.join(folder, file))
 
 
-# OPEN3D FUNCTIONS______________________________________________________________________________________________________
+def generate_list(file_format, dir, exclude='text_to_exclude', include=''):
+    """
+    Function that generates the list of file with a specific extension in a folder
+    :param file_format: (str) the extension to look for
+    :param dir: (str) the folder to look into
+    :param exclude: (str) an optional parameter to exclude files that include some text in their name
+    :param include: (str) an optional parameter to specifically include files with some text in their name
+    :return: (list) the list of detected files
+    """
+    file_list = []
+    for file in os.listdir(dir):
+        fileloc = os.path.join(dir, file)
+        if file.endswith(file_format):
+            if exclude not in file:
+                if include in file:
+                    file_list.append(fileloc)
+    return file_list
+
+
+def new_dir(dir_path):
+    """
+    Simple function to verify if a directory exists and if not creating it
+    :param dir_path: (str) the path to check
+    :return:
+    """
+    if not os.path.exists(dir_path):
+        os.mkdir(dir_path)
+
+
+"""
+======================================================================================
+OPEN3D FUNCTIONS
+======================================================================================
+"""
+
+
+def basic_vis_creation(load, orientation, p_size=1.5, back_color=[1, 1, 1]):
+    """A function that creates the basic environment for creating things with open3D
+            @ parameters :
+                pcd_load -- a point cloud loaded into open3D
+                orientation -- orientation of the camera; can be 'top', ...
+                p_size -- size of points
+                back_color -- background color
+    """
+    if orientation != 'top':
+        trans_init, inv_trans = name_to_matrix(orientation)
+        load.transform(trans_init)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.add_geometry(load)
+    opt = vis.get_render_option()
+    opt.point_size = p_size
+    opt.mesh_show_back_face = True
+    opt.background_color = np.asarray(back_color)
+    ctr = vis.get_view_control()
+    ctr.change_field_of_view(step=-90)
+
+    vis.poll_events()
+    vis.update_renderer()
+    vis.run()
+
+    return vis, opt, ctr
 def create_box_limit(pcd, output_path):
     bound = pcd.get_oriented_bounding_box()
     points_bb = bound.get_box_points()
@@ -266,7 +305,13 @@ def compute_density(pc_load, center, dim_z):
     return density
 
 
-# CLOUDCOMPARE FUNCTIONS________________________________________________________________________________________________
+"""
+======================================================================================
+CLOUDCOMPARE FUNCTIONS
+======================================================================================
+"""
+
+
 def cc_function(dest_dir, function_name, fun_txt):
     """
     Function that creates a bat file to launch CloudCompare CLI
@@ -349,10 +394,6 @@ def cc_rotate_from_matrix(cloud_path, rot_matrix):
     cc_function(cloud_folder, function_name, fun_txt)
 
     os.remove(txt_path)
-
-
-def cc_recolor(cloud_path, color):
-    pass
 
 
 def cc_sphericity_linesub(cloud_path, radius, filter_min, filter_max):
@@ -519,7 +560,8 @@ def preproc_align_cloud(cloud_path, ransac_obj_folder, ransac_cloud_folder, excl
 
 
 # TRANSFORM COLORS FUNCTIONS____________________________________________________________________________________________
-
+def cc_recolor(cloud_path, color):
+    pass
 
 # 2D RENDERING FUNCTIONS________________________________________________________________________________________________
 def raster_single_bound(cloud_path, grid_step, dir_cc, bound_pc, xray=True):
@@ -536,6 +578,23 @@ def raster_single_bound(cloud_path, grid_step, dir_cc, bound_pc, xray=True):
     function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -MERGE_CLOUDS -RASTERIZE' + proj + ' -VERT_DIR ' + str(
         dir_cc) + ' -GRID_STEP ' \
                + str(grid_step) + ' -OUTPUT_RASTER_RGB '
+
+    # Prepare CloudCompare function
+    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
+    cc_function(cloud_dir, function_name, fun_txt)
+
+def raster_single_bound_height(cloud_path, grid_step, dir_cc, bound_pc):
+    # File names and paths
+    (cloud_dir, cloudname) = os.path.split(cloud_path)
+    cc_cloud = '"' + cloud_path + '"'
+    cc_cloud_lim = '"' + bound_pc + '"'
+    proj = ' -SF_PROJ MAX -PROJ MAX'
+
+    function_name = 'raster'
+
+    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -MERGE_CLOUDS -RASTERIZE' + proj + ' -VERT_DIR ' + str(
+        dir_cc) + ' -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z '
 
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
@@ -621,31 +680,6 @@ def raster_all_bound(cloud_path, grid_step, bound_pc, xray=True, sf=False):
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
     cc_function(cloud_folder, function_name, fun_txt)
-
-
-# FLOORPLANS____________________________________________________________________________________________________________
-def floorplan_advanced(cloud_path, bound_pc, grid_step1, floor_level, ceiling_level, method='verticality'):
-    # File names and paths
-    (cloud_dir, cloudname) = os.path.split(cloud_path)
-    cc_cloud = '"' + cloud_path + '"'
-    cc_cloud_lim = '"' + bound_pc + '"'
-
-    function_name = 'floor'
-    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP '
-
-    if method == 'verticality':
-        pass
-
-    # projection option
-    proj = ' -SF_PROJ MAX -PROJ MAX'
-
-    # OPERATION 1: rasterize and export cloud with population count
-    function += '-RASTERIZE' + proj + ' -GRID_STEP ' \
-                + str(grid_step1) + ' -OUTPUT_CLOUD -SAVE_CLOUDS'
-
-    # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
-    cc_function(cloud_dir, function_name, fun_txt)
 
 
 # CUT SECTIONS__________________________________________________________________________________________________________
@@ -1114,54 +1148,6 @@ def find_planes(obj_list, cloud_folder, cloud_suffix='', orientation='all', size
     return plane_list
 
 
-# DEPRECIATED FUNCTIONS_________________________________________________________________________________________________
-
-def preproc_z_csv(ransac_cloud_folder):  # DEPRECIATED
-    for ply_file in os.listdir(ransac_cloud_folder):
-        if 'merged' in ply_file:
-            cloud_path = os.path.join(ransac_cloud_folder, ply_file)
-    (cloud_folder, cloud_file) = os.path.split(cloud_path)
-    function_name = 'dist_st'
-    cc_cloud = '"' + cloud_path + '"'
-    # function to create a CSV with Z coordinates of all points of a point cloud
-    function = ' -COORD_TO_SF Z -SAVE_CLOUDS'
-
-    # Prepare CloudCompare fonction
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT ASC -ADD_HEADER -EXT csv -AUTO_SAVE OFF -NO_TIMESTAMP  -O ' + cc_cloud + function
-    batpath = os.path.join(cloud_folder, function_name + ".bat")
-    with open(batpath, 'w') as OPATH:
-        OPATH.writelines(fun_txt)
-
-    # Execute function
-    subprocess.call([batpath])
-    os.remove(batpath)
-
-    # find the csv file
-    csv_file = cloud_path[:-4] + '_Z_TO_SF.csv'
-
-    return csv_file
-
-
-def preproc_floors_from_csv(csv_file):  # DEPRECIATED
-    # read the csv file
-    data = pd.read_csv(csv_file, sep=' ')
-    dist = data['Coord._Z']
-
-    # evaluate the range of z coordinates
-
-    # create an histogram of z coordinates
-    z_hist = np.histogram(dist, bins=1000)
-
-    # plot histogram
-    _ = plt.hist(dist, bins=1000)
-    plt.show()
-
-    # compute the number of floors
-    n_floors = 0  # TODO: modify to actual value
-
-    return n_floors
-
-
 """
 ======================================================================================
 ALGEBRA
@@ -1282,35 +1268,6 @@ def name_to_matrix(orientation):
 """
 
 
-def basic_vis_creation(load, orientation, p_size=1.5, back_color=[1, 1, 1]):
-    """A function that creates the basic environment for creating things with open3D
-            @ parameters :
-                pcd_load -- a point cloud loaded into open3D
-                orientation -- orientation of the camera; can be 'top', ...
-                p_size -- size of points
-                back_color -- background color
-    """
-    if orientation != 'top':
-        trans_init, inv_trans = name_to_matrix(orientation)
-        load.transform(trans_init)
-
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.add_geometry(load)
-    opt = vis.get_render_option()
-    opt.point_size = p_size
-    opt.mesh_show_back_face = True
-    opt.background_color = np.asarray(back_color)
-    ctr = vis.get_view_control()
-    ctr.change_field_of_view(step=-90)
-
-    vis.poll_events()
-    vis.update_renderer()
-    vis.run()
-
-    return vis, opt, ctr
-
-
 def crop_and_save(image_path):
     image = Image.open(image_path)
     y_nonzero, x_nonzero, _ = np.nonzero(image)
@@ -1329,6 +1286,7 @@ def get_nonzero_coord(image_path):
 
     return xmin, xmax, ymin, ymax
 
+
 def mask_image_with_shape(original_img, mask_img):
     result_image = np.ones_like(original_img) * 255
 
@@ -1343,6 +1301,7 @@ def mask_image_with_shape(original_img, mask_img):
     result_image[interest_mask == 255] = original_img[interest_mask == 255]
 
     return result_image
+
 
 def convert_mask_polygon(image_path, original_rgb, dest_poly_path, dest_crop_poly_path, dest_poly_rgb_path, dest_poly_rgb_crop_path):
     mask_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -1476,6 +1435,7 @@ def count_black_pixels(image):
 
     return black_pixel_count
 
+
 def generate_summary_canva(image_list, name_list, dest_path):
     # Sort images based on pixel area
     sorted_images_and_names = sorted(zip(image_list, name_list), key=lambda x: np.sum(x[0] == 0))
@@ -1505,3 +1465,45 @@ def generate_summary_canva(image_list, name_list, dest_path):
         current_x += w
 
     cv2.imwrite(dest_path, inventory_picture)
+
+
+def create_elevation(dtm_path, dest_path, type='standard'):
+    """
+
+    :param dtm_path: path to the DTM as a tif
+    :param dest_path: path to save the image to
+    :param type: can be 'standard' (only height colormap), 'hill', or 'combined'
+    :return:
+    """
+    with rio.open(dtm_path) as src:
+        elevation = src.read(1)
+        # Set masked values to np.nan
+        elevation[elevation < 0] = np.nan
+
+    # Define a colormap (you can choose or create your own)
+    cmap = plt.get_cmap("terrain")
+
+    # Normalize the altitude values between 0 and 1
+    norm = mcolors.Normalize(vmin=np.min(elevation), vmax=np.max(elevation))
+
+    hillshade = es.hillshade(elevation)
+
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+
+    # Plot the altitude data with the colormap
+    im = ax.imshow(elevation, cmap=cmap, norm=norm)
+
+    # Remove x and y axis ticks and labels
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+
+    # ax.imshow(hillshade, cmap="Greys", alpha=0.5)
+
+    # Save the figure to a temporary image
+    plt.savefig(dest_path, bbox_inches="tight", pad_inches=0, transparent=True)
+
+    # Close the figure
+    plt.close()
