@@ -87,6 +87,8 @@ class NokPointCloud:
 
         # render properties
         self.res = 0
+        self.standard_im_done = False
+        self.height_im_done = False
 
     def update_dirs(self):
         self.location_dir, self.file = os.path.split(self.path)
@@ -179,6 +181,39 @@ class NokPointCloud:
         out_l_mir = ImageOps.mirror(im_left)
         im_left.close()
         out_l_mir.save(path_left)
+
+        self.standard_im_done = True
+
+    def height_images(self):
+        if self.standard_im_done:
+            process.raster_single_bound_height(self.path, self.res / 1000, 2, self.bound_pc_path)
+
+            # create new path for dtm
+            path_dtm = os.path.join(self.img_dir, 'dtm.tif')
+            path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
+            path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
+            path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
+            path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
+
+            self.view_names.extend(['elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
+            self.view_paths.extend([path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
+
+            # relocate image file
+            img_list = process.generate_list('.tif', self.location_dir)
+            os.rename(img_list[0], path_dtm)
+
+            # process files
+            process.create_elevation(path_dtm, path_top_elevation, type='standard')
+            process.create_elevation(path_dtm, path_top_hillshade, type='hill')
+
+            process.create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
+                                                 path_top_hybrid1, path_top_hybrid2)
+
+
+        else:
+            print('Process standard images first!')
+            pass
+
 
     def planarity_images(self, orientation, span):
         if self.ransac_done:
@@ -1019,6 +1054,9 @@ class SkyStock(QtWidgets.QMainWindow):
         print('Launching RGB render/exterior views creation...')
         pc.standard_images()
 
+        # 5. GENERATE HEIGHT VIEWS
+        pc.height_images()
+
     def on_img_combo_change(self):
         self.actionCrop.setEnabled(True)
         i = self.comboBox.currentIndex()
@@ -1027,7 +1065,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.current_view = self.current_cloud.view_names[i]
         print(i)
         print(self.current_view)
-        if self.current_view == 'back' or self.current_view == 'left':
+        if self.current_view != 'top':
             self.actionCrop.setEnabled(False)
 
         img_paths = self.current_cloud.view_paths

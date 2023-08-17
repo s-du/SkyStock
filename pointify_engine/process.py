@@ -18,6 +18,8 @@ from PIL import Image
 from PySide6 import QtCore, QtGui, QtWidgets
 from scipy.signal import find_peaks
 
+from blend_modes import multiply, hard_light
+
 cc_path = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
 
 
@@ -1436,6 +1438,10 @@ def count_black_pixels(image):
     return black_pixel_count
 
 
+def generate_summary_canva_from_inv():
+    pass
+
+
 def generate_summary_canva(image_list, name_list, dest_path):
     # Sort images based on pixel area
     sorted_images_and_names = sorted(zip(image_list, name_list), key=lambda x: np.sum(x[0] == 0))
@@ -1466,13 +1472,40 @@ def generate_summary_canva(image_list, name_list, dest_path):
 
     cv2.imwrite(dest_path, inventory_picture)
 
+def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_path1, dest_path2):
+    rgb = np.asarray(Image.open(rgb_path))
+    elevation = np.asarray(Image.open(elevation_path))
+    hillshade = np.asarray(Image.open(hillshade_path))
+
+    foreground = hillshade  # Inputs to blend_modes need to be numpy arrays.
+    foreground_float = foreground.astype(float)  # Inputs to blend_modes need to be floats.
+    background = elevation
+    background_float = background.astype(float)
+    blended = hard_light(background_float, foreground_float, 0.7)
+
+    blended_img = np.uint8(blended)
+    blended_img_raw = Image.fromarray(blended_img)
+    blended_img_raw = blended_img_raw.convert('RGB')
+    blended_img_raw.save(dest_path1)
+
+    foreground = hillshade  # Inputs to blend_modes need to be numpy arrays.
+    foreground_float = foreground.astype(float)  # Inputs to blend_modes need to be floats.
+    background = rgb
+    background_float = background.astype(float)
+    blended = hard_light(background_float, foreground_float, 0.7)
+
+    blended_img = np.uint8(blended)
+    blended_img_raw = Image.fromarray(blended_img)
+    blended_img_raw = blended_img_raw.convert('RGB')
+    blended_img_raw.save(dest_path2)
+
 
 def create_elevation(dtm_path, dest_path, type='standard'):
     """
 
     :param dtm_path: path to the DTM as a tif
     :param dest_path: path to save the image to
-    :param type: can be 'standard' (only height colormap), 'hill', or 'combined'
+    :param type: can be 'standard' (only height colormap), 'hill'
     :return:
     """
     with rio.open(dtm_path) as src:
@@ -1483,27 +1516,13 @@ def create_elevation(dtm_path, dest_path, type='standard'):
     # Define a colormap (you can choose or create your own)
     cmap = plt.get_cmap("terrain")
 
-    # Normalize the altitude values between 0 and 1
-    norm = mcolors.Normalize(vmin=np.min(elevation), vmax=np.max(elevation))
-
     hillshade = es.hillshade(elevation)
 
-    # Create a figure and axis
-    fig, ax = plt.subplots()
-
     # Plot the altitude data with the colormap
-    im = ax.imshow(elevation, cmap=cmap, norm=norm)
-
-    # Remove x and y axis ticks and labels
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-
-    # ax.imshow(hillshade, cmap="Greys", alpha=0.5)
-
-    # Save the figure to a temporary image
-    plt.savefig(dest_path, bbox_inches="tight", pad_inches=0, transparent=True)
+    if type=='standard':
+        plt.imsave(fname=dest_path, arr=elevation, cmap=cmap)
+    elif type == 'hill':
+        plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys')
 
     # Close the figure
     plt.close()
