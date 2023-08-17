@@ -10,18 +10,35 @@ import os
 import pandas as pd
 import rasterio as rio
 import shapely as sh
+import shutil
 import statistics
 import subprocess
 
 from shapely.geometry import Polygon
-from PIL import Image
+from PIL import Image, ImageOps
 from PySide6 import QtCore, QtGui, QtWidgets
 from scipy.signal import find_peaks
 
 from blend_modes import multiply, hard_light
 
-cc_path = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
+# PARAMETERS
+CC_PATH = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
+POINT_LIM = 1_000_000  # the limit of point above which performing a subsampling operation for advanced computations
+VOXEL_DS = 0.025  # When the point cloud is to dense, this gives the minimum spatial distance to keep between two points
+MIN_RANSAC_FACTOR = 350  # (Total number of points / MIN_RANSAC_FACTOR) gives the minimum amount of points to define a
+# Ransac detection
+RANSAC_DIST = 0.03  # maximum distance for a point to be considered belonging to a plane
 
+# Floor detection
+BIN_HEIGHT = 0.1
+
+# Geometric parameters
+SPHERE_FACTOR = 10
+SPHERE_MIN = 0.019
+SPHERE_MAX = 1
+
+# Planar analysis
+SPAN = 0.03
 
 class RunnerSignals(QtCore.QObject):
     progressed = QtCore.Signal(int)
@@ -106,6 +123,374 @@ class RunnerBasicProp(QtCore.QRunnable):
         self.dim = dim
         self.density = density
         self.n_points = n_points
+
+
+class StockPileObject:
+    def __init__(self):
+        self.name = ''
+        self.yolo_bbox = None
+        self.pc = None
+        self.mask = None
+        self.mask_rgb = None
+        self.mask_cropped = None
+        self.mask_rgb_cropped = None
+        self.coords = None
+        self.area = 0
+
+
+class LineMeas:
+    def __init__(self):
+        self.main_item = None
+        self.spot_items = []
+        self.text_items = []
+        self.coords = []
+        self.data_roi = []
+
+        self.hmin = 0
+        self.hmax = 0
+
+    def compute_data(self, img, P1, P2):
+        imageH = img.shape[0]
+        imageW = img.shape[1]
+        P1X = P1[0]
+        P1Y = P1[1]
+        P2X = P2[0]
+        P2Y = P2[1]
+
+        # difference and absolute difference between points
+        # used to calculate slope and relative location between points
+        dX = P2X - P1X
+        dY = P2Y - P1Y
+        dXa = np.abs(dX)
+        dYa = np.abs(dY)
+
+        # predefine numpy array for output based on distance between points
+        itbuffer = np.empty(shape=(np.maximum(dYa, dXa), 3), dtype=np.float32)
+        itbuffer.fill(np.nan)
+
+        # Obtain coordinates along the line using a form of Bresenham's algorithm
+        negY = P1Y > P2Y
+        negX = P1X > P2X
+        if P1X == P2X:  # vertical line segment
+            itbuffer[:, 0] = P1X
+            if negY:
+                itbuffer[:, 1] = np.arange(P1Y - 1, P1Y - dYa - 1, -1)
+            else:
+                itbuffer[:, 1] = np.arange(P1Y + 1, P1Y + dYa + 1)
+        elif P1Y == P2Y:  # horizontal line segment
+            itbuffer[:, 1] = P1Y
+            if negX:
+                itbuffer[:, 0] = np.arange(P1X - 1, P1X - dXa - 1, -1)
+            else:
+                itbuffer[:, 0] = np.arange(P1X + 1, P1X + dXa + 1)
+        else:  # diagonal line segment
+            steepSlope = dYa > dXa
+            if steepSlope:
+                slope = dX.astype(np.float32) / dY.astype(np.float32)
+                if negY:
+                    itbuffer[:, 1] = np.arange(P1Y - 1, P1Y - dYa - 1, -1)
+                else:
+                    itbuffer[:, 1] = np.arange(P1Y + 1, P1Y + dYa + 1)
+                itbuffer[:, 0] = (slope * (itbuffer[:, 1] - P1Y)).astype(int) + P1X
+            else:
+                slope = dY.astype(np.float32) / dX.astype(np.float32)
+                if negX:
+                    itbuffer[:, 0] = np.arange(P1X - 1, P1X - dXa - 1, -1)
+                else:
+                    itbuffer[:, 0] = np.arange(P1X + 1, P1X + dXa + 1)
+                itbuffer[:, 1] = (slope * (itbuffer[:, 0] - P1X)).astype(int) + P1Y
+
+        # Remove points outside of image
+        colX = itbuffer[:, 0]
+        colY = itbuffer[:, 1]
+        itbuffer = itbuffer[(colX >= 0) & (colY >= 0) & (colX < imageW) & (colY < imageH)]
+
+        # Get intensities from img ndarray
+        itbuffer[:, 2] = img[itbuffer[:, 1].astype(int), itbuffer[:, 0].astype(int)]
+        self.data_roi = itbuffer[:, 2]
+
+    def compute_extrema(self):
+        self.hmax = np.amax(self.data_roi)
+        self.hmin = np.amin(self.data_roi)
+
+    def create_all_annex_infos(self):
+        pass
+
+
+class NokPointCloud:
+    def __init__(self):
+        self.name = ''
+        self.path = ''
+
+        self.pc_load = None
+        self.mesh_load = None
+        self.bound_pc_path = ''
+        self.sub_pc_path = ''
+        self.folder = ''
+        self.processed_data_dir = ''
+        self.img_dir = ''
+        self.sub_sampled = False
+        self.view_names = []
+        self.view_paths = []
+
+        self.poisson_mesh_path = ''
+
+        # basic properties
+        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = 0, 0, 0, 0, 0, 0
+        self.n_points = 0
+        self.n_points_sub = 0
+
+        # render properties
+        self.res = 0
+        self.standard_im_done = False
+        self.height_im_done = False
+
+    def update_dirs(self):
+        self.location_dir, self.file = os.path.split(self.path)
+
+    def do_preprocess(self):
+        self.pc_load = o3d.io.read_point_cloud(self.path)
+
+        self.bound_pc_path = os.path.join(self.processed_data_dir, "pc_limits.ply")
+        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = compute_basic_properties(
+            self.pc_load,
+            save_bound_pc=True,
+            output_path_bound_pc=self.bound_pc_path)
+
+        print(f'The point cloud density is: {self.density:.3f}')
+
+        if self.density < 0.05:  # if to many points --> Subsample
+            sub_pc_path = os.path.join(self.location_dir,
+                                       'subsampled.ply')  # path to the subsampled version of the point cloud
+            sub = self.pc_load.voxel_down_sample(0.05)
+            o3d.io.write_point_cloud(sub_pc_path, sub)
+            self.sub_sampled = True
+            self.density = 0.05
+
+            self.path = sub_pc_path
+            self.update_dirs()
+
+    def do_mesh(self):
+        if self.pc_load:
+            self.pc_load.estimate_normals()
+            self.pc_load.orient_normals_consistent_tangent_plane(100)
+            with o3d.utility.VerbosityContextManager(
+                    o3d.utility.VerbosityLevel.Debug) as cm:
+                mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                    self.pc_load, depth=11)
+
+            densities = np.asarray(densities)
+
+            print('remove low density vertices')
+            vertices_to_remove = densities < np.quantile(densities, 0.025)
+            mesh.remove_vertices_by_mask(vertices_to_remove)
+            mesh.compute_triangle_normals()
+
+            self.poisson_mesh_path = os.path.join(self.processed_data_dir, "poisson_mesh.obj")
+
+            o3d.io.write_triangle_mesh(self.poisson_mesh_path, mesh)
+            self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
+
+    def standard_images(self):
+        self.res = round(self.density * 5, 3) * 1000
+        raster_all_bound(self.path, self.res / 1000, self.bound_pc_path, xray=False)
+
+        # create new images paths
+        path_top = os.path.join(self.img_dir, 'top.tif')
+        path_right = os.path.join(self.img_dir, 'right.tif')
+        path_front = os.path.join(self.img_dir, 'front.tif')
+        path_front_after = os.path.join(self.img_dir, 'front2.tif')
+        path_back = os.path.join(self.img_dir, 'back.tif')
+        path_left = os.path.join(self.img_dir, 'left.tif')
+
+        self.view_names.extend(['top', 'right', 'front', 'back', 'left'])
+        self.view_paths.extend([path_top, path_right, path_front, path_back, path_left])
+
+        # relocate image files
+        img_list = generate_list('.tif', self.location_dir)
+        os.rename(img_list[0], path_right)
+        os.rename(img_list[1], path_back)
+        os.rename(img_list[2], path_top)
+        os.rename(img_list[3], path_left)
+        os.rename(img_list[4], path_front)
+
+        # rotate right view (CloudCompare output is tilted by 90°)
+        # read the images
+        im_front = Image.open(path_front)
+        im_back = Image.open(path_back)
+        im_left = Image.open(path_left)
+
+        # rotate image by 90 degrees and mirror if needed
+        angle = 90
+        # process front image
+
+        out_f = im_front.rotate(angle, expand=True)
+        out_f_mir = ImageOps.mirror(out_f)
+        im_front.close()
+        out_f_mir.save(path_front)
+        # process back image
+        out_b = im_back.rotate(angle, expand=True)
+        im_back.close()
+        out_b.save(path_back)
+        # process left image
+        out_l_mir = ImageOps.mirror(im_left)
+        im_left.close()
+        out_l_mir.save(path_left)
+
+        self.standard_im_done = True
+
+    def height_images(self):
+        if self.standard_im_done:
+            raster_single_bound_height(self.path, self.res / 1000, 2, self.bound_pc_path)
+
+            # create new path for dtm
+            path_dtm = os.path.join(self.img_dir, 'dtm.tif')
+            path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
+            path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
+            path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
+            path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
+
+            self.view_names.extend(['elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
+            self.view_paths.extend([path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
+
+            # relocate image file
+            img_list = generate_list('.tif', self.location_dir)
+            os.rename(img_list[0], path_dtm)
+
+            # process files
+            create_elevation(path_dtm, path_top_elevation, type='standard')
+            create_elevation(path_dtm, path_top_hillshade, type='hill')
+
+            create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
+                                                 path_top_hybrid1, path_top_hybrid2)
+
+
+        else:
+            print('Process standard images first!')
+            pass
+
+    def planarity_images(self, orientation, span):
+        if self.ransac_done:
+            shutil.rmtree(self.ransac_cloud_folder)
+            shutil.rmtree(self.ransac_obj_folder)
+        self.do_ransac(min_factor=150)
+
+        # create pcv version of subsampled cloud
+        self.pcv_path = os.path.join(self.processed_data_dir, 'pcv.ply')
+        create_pcv(self.sub_pc_path)
+        sub_dir, _ = os.path.split(self.sub_pc_path)
+        find_substring_new_path('PCV', self.pcv_path, sub_dir)
+        # apply iso_transf
+        mat, inv_mat = iso1_mat()
+        cc_rotate_from_matrix(self.pcv_path, mat)
+        self.transf_pcv_path = find_substring('pcv_TRANSFORMED', self.processed_data_dir)
+
+        print('Launching planarity views creation...')
+        # create new directory for results
+        h_planes_img_dir = os.path.join(self.img_dir, 'horizontal_planes_views')
+        h_planes_pc_dir = os.path.join(self.processed_data_dir, 'horizontal_planes_pc')
+        new_dir(h_planes_img_dir)
+        new_dir(h_planes_pc_dir)
+
+        # create a list of detected planes
+        plane_list = generate_list('obj', self.ransac_obj_folder, exclude='merged')
+
+        # find horizontal planes
+        hor_planes = find_planes(plane_list, self.ransac_cloud_folder, orientation=orientation,
+                                         size_absolute='area_greater_than')
+        hor_planes_loc = hor_planes[2]
+
+        # create new_clouds from the detected planes (the original point cloud is segmented around the plane)
+        n_h_elements = cc_planes_to_build_dist_list(self.path, hor_planes_loc, h_planes_pc_dir, span=span)
+
+        # computing the properties for each new point cloud --> Useful to place the images on the entire point cloud
+        new_pc_list = generate_list('.las', h_planes_pc_dir)
+        # TODO: continue here
+
+        # rendering each element
+        list_h_planes_pc = generate_list('.las', h_planes_pc_dir)
+        for cloud in list_h_planes_pc:
+            render_planar_segment(cloud, self.res / 1000)
+
+            # visual location
+            #   rotate plane
+            cc_rotate_from_matrix(cloud, mat)
+            plane_rotated_path = find_substring('TRANSFORMED', h_planes_pc_dir)
+            render_plane_in_cloud(plane_rotated_path, self.transf_pcv_path, self.res / 1000)
+
+        i = 0
+        for file in os.listdir(self.processed_data_dir):
+            if file.endswith('.tif'):
+                new_file = f'location_plane{i + 1}'
+                os.rename(os.path.join(self.processed_data_dir, file), os.path.join(h_planes_img_dir, new_file))
+                i += 1
+        j = 0
+        for file in os.listdir(h_planes_pc_dir):
+            if file.endswith('.tif'):
+                new_file = f'planarity{j + 1}'
+                os.rename(os.path.join(h_planes_pc_dir, file), os.path.join(h_planes_img_dir, new_file))
+                j += 1
+
+        # add renders to list
+        for img in os.listdir(h_planes_img_dir):
+            self.view_names.append(img)
+            self.view_paths.append(os.path.join(h_planes_img_dir, img))
+
+    def do_orient(self):
+        R = preproc_align_cloud(self.path, self.ransac_obj_folder, self.ransac_cloud_folder)
+        print(f'The point cloud has been rotated with {R} matrix...')
+
+        transformed_path = find_substring('TRANSFORMED', self.location_dir)
+        _, trans_file = os.path.split(transformed_path)
+        new_path = os.path.join(self.processed_data_dir, trans_file)
+        # move transformed file
+        os.rename(transformed_path, new_path)
+
+        self.path = new_path
+        self.update_dirs()
+        self.pc_load = o3d.io.read_point_cloud(self.path)
+        self.bound, self.bound_points, self.center, self.dim, _, _ = compute_basic_properties(self.pc_load,
+                                                                                                      save_bound_pc=True,
+                                                                                                      output_path_bound_pc=self.bound_pc_path)
+        if self.sub_sampled:
+            self.sub_pc_path
+
+    def do_ransac(self, min_factor=MIN_RANSAC_FACTOR):
+        self.sub_sampled = False
+        # create RANSAC directories
+        self.ransac_cloud_folder = os.path.join(self.processed_data_dir, 'RANSAC_pc')
+        new_dir(self.ransac_cloud_folder)
+
+        self.ransac_obj_folder = os.path.join(self.processed_data_dir, 'RANSAC_meshes')
+        new_dir(self.ransac_obj_folder)
+
+        # subsampling the point cloud if needed
+        self.sub_pc_path = os.path.join(self.processed_data_dir,
+                                        'subsampled.ply')  # path to the subsampled version of the point cloud
+
+        if self.n_points > POINT_LIM:  # if to many points --> Subsample
+            sub = self.pc_load.voxel_down_sample(VOXEL_DS)
+            o3d.io.write_point_cloud(self.sub_pc_path, sub)
+            self.sub_sampled = True
+        else:
+            shutil.copyfile(self.path, self.sub_pc_path)
+
+        if self.sub_sampled:
+            _, _, _, _, _, self.n_points_sub = compute_basic_properties(sub)
+            print(f'The subsampled point cloud has {self.n_points_sub} points')
+
+        # fixing RANSAC Parameters
+        if not self.sub_sampled:
+            points = self.n_points
+        else:
+            points = self.n_points_sub
+        min_points = points / min_factor
+        print(f'here are the minimum points {min_points}')
+
+        self.n_planes = preproc_ransac_short(self.sub_pc_path, min_points, RANSAC_DIST, self.ransac_obj_folder,
+                                                     self.ransac_cloud_folder)
+
+        self.ransac_done = True
 
 
 """
@@ -338,7 +723,7 @@ def compute_volume_clouds(cloud_path_ceiling, cloud_path_floor):
     function = f' -VOLUME -GRID_STEP 0.2'
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
               cc_cloud_ceiling + ' -O ' + cc_cloud_floor + function
     cc_function(cloud_folder, function_name, fun_txt)
 
@@ -362,7 +747,7 @@ def crop_coords(cloud_path, coords, outside=False):
         function += ' -OUTSIDE -RASTERIZE -GRID_STEP 0.05 -EMPTY_FILL INTERP -OUTPUT_CLOUD'
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
               cc_cloud + function
     cc_function(cloud_folder, function_name, fun_txt)
 
@@ -392,7 +777,7 @@ def cc_rotate_from_matrix(cloud_path, rot_matrix):
     function = ' -APPLY_TRANS ' + str(cc_txt_path)
 
     # prepare CloudCompare fonction
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -NO_TIMESTAMP -C_EXPORT_FMT PLY -O ' + cc_cloud + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -NO_TIMESTAMP -C_EXPORT_FMT PLY -O ' + cc_cloud + function
     cc_function(cloud_folder, function_name, fun_txt)
 
     os.remove(txt_path)
@@ -410,7 +795,7 @@ def cc_sphericity_linesub(cloud_path, radius, filter_min, filter_max):
         float(filter_max))
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -O ' + \
               cc_cloud + function
     cc_function(cloud_folder, function_name, fun_txt)
 
@@ -434,7 +819,7 @@ def preproc_ransac_short(cloud_path, min_points, dist, obj_out_dir, cloud_out_di
                 '-SAVE_MESHES -MERGE_CLOUDS -SAVE_CLOUDS '
 
     # Prepare cloudcompare fonction
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -NO_TIMESTAMP -AUTO_SAVE OFF -O ' + cc_cloud + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -NO_TIMESTAMP -AUTO_SAVE OFF -O ' + cc_cloud + function
     cc_function(cloud_dir, function_name, fun_txt)
 
     # Sort files
@@ -582,7 +967,7 @@ def raster_single_bound(cloud_path, grid_step, dir_cc, bound_pc, xray=True):
                + str(grid_step) + ' -OUTPUT_RASTER_RGB '
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 def raster_single_bound_height(cloud_path, grid_step, dir_cc, bound_pc):
@@ -599,7 +984,7 @@ def raster_single_bound_height(cloud_path, grid_step, dir_cc, bound_pc):
                + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z '
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 
@@ -614,7 +999,7 @@ def render_plane_in_cloud(plane_cloud_path, cloud_path, grid_step):
         grid_step) + ' -OUTPUT_RASTER_RGB'
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -REMOVE_ALL_SFS -O  ' + cc_mesh + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -REMOVE_ALL_SFS -O  ' + cc_mesh + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 
@@ -627,7 +1012,7 @@ def create_pcv(cloud_path):
     function = ' -AUTO_SAVE OFF -C_EXPORT_FMT PLY -PCV -SF_CONVERT_TO_RGB FALSE -SAVE_CLOUDS'
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 
@@ -643,7 +1028,7 @@ def render_planar_segment(cloud_path, grid_step):
                + str(grid_step) + ' -OUTPUT_RASTER_RGB'
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 
@@ -680,7 +1065,7 @@ def raster_all_bound(cloud_path, grid_step, bound_pc, xray=True, sf=False):
             grid_step) + ' -OUTPUT_RASTER_RGB '
 
     # Prepare CloudCompare function
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
     cc_function(cloud_folder, function_name, fun_txt)
 
 
@@ -742,7 +1127,7 @@ def cut_sections_all_dirs(cloud_path, center_x, size_x, center_y, size_y, center
         function_txt = function_txt + ' -CROSS_SECTION ' + cc_xml
         xml_files.append(xml_path)
 
-    fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -NO_TIMESTAMP  -O ' \
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT PLY -NO_TIMESTAMP  -O ' \
               + cc_cloud + function_txt
 
     cc_function(cloud_folder, function_name, fun_txt)
@@ -773,7 +1158,7 @@ def cc_planes_to_build_dist_list(cloud_path, obj_list, cloud_out_folder, dist=0.
             float(dist) - span) + ' -SAVE_CLOUDS -CLEAR_MESHES '
 
         # Prepare CloudCompare fonction
-        fun_txt = 'SET MY_PATH="' + cc_path + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT LAS -AUTO_SAVE OFF -O ' + cc_cloud + function_load_compare
+        fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -C_EXPORT_FMT LAS -AUTO_SAVE OFF -O ' + cc_cloud + function_load_compare
 
         # Execute function
         cc_function(cloud_dir, function_name, fun_txt)

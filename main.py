@@ -1,9 +1,8 @@
 from PySide6 import QtWidgets, QtGui, QtCore
-from PIL import Image, ImageOps
 import cv2
 import open3d as o3d
 import open3d.visualization.gui as gui
-import numpy as np
+
 
 import os
 import shutil
@@ -31,312 +30,8 @@ model = YOLO(model_path)  # load a custom model
 threshold = 0.5
 class_name_dict = {0: 'stock_pile', 1: 'vehicle', 2: 'building', 3: 'stock_with_wall', 4: 'in_construction'}
 
-# PARAMETERS
-POINT_LIM = 1_000_000  # the limit of point above which performing a subsampling operation for advanced computations
-VOXEL_DS = 0.025  # When the point cloud is to dense, this gives the minimum spatial distance to keep between two points
-MIN_RANSAC_FACTOR = 350  # (Total number of points / MIN_RANSAC_FACTOR) gives the minimum amount of points to define a
-# Ransac detection
-RANSAC_DIST = 0.03  # maximum distance for a point to be considered belonging to a plane
-
-# Floor detection
-BIN_HEIGHT = 0.1
-
-# Geometric parameters
-SPHERE_FACTOR = 10
-SPHERE_MIN = 0.019
-SPHERE_MAX = 1
-
-# Planar analysis
-SPAN = 0.03
-
-class StockPileObject:
-    def __init__(self):
-        self.name = ''
-        self.yolo_bbox = None
-        self.pc = None
-        self.mask = None
-        self.mask_rgb = None
-        self.mask_cropped = None
-        self.mask_rgb_cropped = None
-        self.coords = None
-        self.area = 0
 
 
-class NokPointCloud:
-    def __init__(self):
-        self.name = ''
-        self.path = ''
-
-        self.pc_load = None
-        self.mesh_load = None
-        self.bound_pc_path = ''
-        self.sub_pc_path = ''
-        self.folder = ''
-        self.processed_data_dir = ''
-        self.img_dir = ''
-        self.sub_sampled = False
-        self.view_names = []
-        self.view_paths = []
-
-        self.poisson_mesh_path = ''
-
-        # basic properties
-        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = 0, 0, 0, 0, 0, 0
-        self.n_points = 0
-        self.n_points_sub = 0
-
-        # render properties
-        self.res = 0
-        self.standard_im_done = False
-        self.height_im_done = False
-
-    def update_dirs(self):
-        self.location_dir, self.file = os.path.split(self.path)
-
-    def do_preprocess(self):
-        self.pc_load = o3d.io.read_point_cloud(self.path)
-
-        self.bound_pc_path = os.path.join(self.processed_data_dir, "pc_limits.ply")
-        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = process.compute_basic_properties(
-            self.pc_load,
-            save_bound_pc=True,
-            output_path_bound_pc=self.bound_pc_path)
-
-        print(f'The point cloud density is: {self.density:.3f}')
-
-        if self.density < 0.05:  # if to many points --> Subsample
-            sub_pc_path = os.path.join(self.location_dir,
-                                       'subsampled.ply')  # path to the subsampled version of the point cloud
-            sub = self.pc_load.voxel_down_sample(0.05)
-            o3d.io.write_point_cloud(sub_pc_path, sub)
-            self.sub_sampled = True
-            self.density = 0.05
-
-            self.path = sub_pc_path
-            self.update_dirs()
-
-    def do_mesh(self):
-        if self.pc_load:
-            self.pc_load.estimate_normals()
-            self.pc_load.orient_normals_consistent_tangent_plane(100)
-            with o3d.utility.VerbosityContextManager(
-                    o3d.utility.VerbosityLevel.Debug) as cm:
-                mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-                    self.pc_load, depth=11)
-
-            densities = np.asarray(densities)
-
-            print('remove low density vertices')
-            vertices_to_remove = densities < np.quantile(densities, 0.025)
-            mesh.remove_vertices_by_mask(vertices_to_remove)
-            mesh.compute_triangle_normals()
-
-            self.poisson_mesh_path = os.path.join(self.processed_data_dir, "poisson_mesh.obj")
-
-            o3d.io.write_triangle_mesh(self.poisson_mesh_path, mesh)
-            self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
-
-    def standard_images(self):
-        self.res = round(self.density * 5, 3) * 1000
-        process.raster_all_bound(self.path, self.res / 1000, self.bound_pc_path, xray=False)
-
-        # create new images paths
-        path_top = os.path.join(self.img_dir, 'top.tif')
-        path_right = os.path.join(self.img_dir, 'right.tif')
-        path_front = os.path.join(self.img_dir, 'front.tif')
-        path_front_after = os.path.join(self.img_dir, 'front2.tif')
-        path_back = os.path.join(self.img_dir, 'back.tif')
-        path_left = os.path.join(self.img_dir, 'left.tif')
-
-        self.view_names.extend(['top', 'right', 'front', 'back', 'left'])
-        self.view_paths.extend([path_top, path_right, path_front, path_back, path_left])
-
-        # relocate image files
-        img_list = process.generate_list('.tif', self.location_dir)
-        os.rename(img_list[0], path_right)
-        os.rename(img_list[1], path_back)
-        os.rename(img_list[2], path_top)
-        os.rename(img_list[3], path_left)
-        os.rename(img_list[4], path_front)
-
-        # rotate right view (CloudCompare output is tilted by 90°)
-        # read the images
-        im_front = Image.open(path_front)
-        im_back = Image.open(path_back)
-        im_left = Image.open(path_left)
-
-        # rotate image by 90 degrees and mirror if needed
-        angle = 90
-        # process front image
-
-        out_f = im_front.rotate(angle, expand=True)
-        out_f_mir = ImageOps.mirror(out_f)
-        im_front.close()
-        out_f_mir.save(path_front)
-        # process back image
-        out_b = im_back.rotate(angle, expand=True)
-        im_back.close()
-        out_b.save(path_back)
-        # process left image
-        out_l_mir = ImageOps.mirror(im_left)
-        im_left.close()
-        out_l_mir.save(path_left)
-
-        self.standard_im_done = True
-
-    def height_images(self):
-        if self.standard_im_done:
-            process.raster_single_bound_height(self.path, self.res / 1000, 2, self.bound_pc_path)
-
-            # create new path for dtm
-            path_dtm = os.path.join(self.img_dir, 'dtm.tif')
-            path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
-            path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
-            path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
-            path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
-
-            self.view_names.extend(['elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
-            self.view_paths.extend([path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
-
-            # relocate image file
-            img_list = process.generate_list('.tif', self.location_dir)
-            os.rename(img_list[0], path_dtm)
-
-            # process files
-            process.create_elevation(path_dtm, path_top_elevation, type='standard')
-            process.create_elevation(path_dtm, path_top_hillshade, type='hill')
-
-            process.create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
-                                                 path_top_hybrid1, path_top_hybrid2)
-
-
-        else:
-            print('Process standard images first!')
-            pass
-
-
-    def planarity_images(self, orientation, span):
-        if self.ransac_done:
-            shutil.rmtree(self.ransac_cloud_folder)
-            shutil.rmtree(self.ransac_obj_folder)
-        self.do_ransac(min_factor=150)
-
-        # create pcv version of subsampled cloud
-        self.pcv_path = os.path.join(self.processed_data_dir, 'pcv.ply')
-        process.create_pcv(self.sub_pc_path)
-        sub_dir, _ = os.path.split(self.sub_pc_path)
-        process.find_substring_new_path('PCV', self.pcv_path, sub_dir)
-        # apply iso_transf
-        mat, inv_mat = process.iso1_mat()
-        process.cc_rotate_from_matrix(self.pcv_path, mat)
-        self.transf_pcv_path = process.find_substring('pcv_TRANSFORMED', self.processed_data_dir)
-
-        print('Launching planarity views creation...')
-        # create new directory for results
-        h_planes_img_dir = os.path.join(self.img_dir, 'horizontal_planes_views')
-        h_planes_pc_dir = os.path.join(self.processed_data_dir, 'horizontal_planes_pc')
-        process.new_dir(h_planes_img_dir)
-        process.new_dir(h_planes_pc_dir)
-
-        # create a list of detected planes
-        plane_list = process.generate_list('obj', self.ransac_obj_folder, exclude='merged')
-
-        # find horizontal planes
-        hor_planes = process.find_planes(plane_list, self.ransac_cloud_folder, orientation=orientation,
-                                         size_absolute='area_greater_than')
-        hor_planes_loc = hor_planes[2]
-
-        # create new_clouds from the detected planes (the original point cloud is segmented around the plane)
-        n_h_elements = process.cc_planes_to_build_dist_list(self.path, hor_planes_loc, h_planes_pc_dir, span=span)
-
-        # computing the properties for each new point cloud --> Useful to place the images on the entire point cloud
-        new_pc_list = process.generate_list('.las', h_planes_pc_dir)
-        # TODO: continue here
-
-        # rendering each element
-        list_h_planes_pc = process.generate_list('.las', h_planes_pc_dir)
-        for cloud in list_h_planes_pc:
-            process.render_planar_segment(cloud, self.res / 1000)
-
-            # visual location
-            #   rotate plane
-            process.cc_rotate_from_matrix(cloud, mat)
-            plane_rotated_path = process.find_substring('TRANSFORMED', h_planes_pc_dir)
-            process.render_plane_in_cloud(plane_rotated_path, self.transf_pcv_path, self.res / 1000)
-
-        i = 0
-        for file in os.listdir(self.processed_data_dir):
-            if file.endswith('.tif'):
-                new_file = f'location_plane{i + 1}'
-                os.rename(os.path.join(self.processed_data_dir, file), os.path.join(h_planes_img_dir, new_file))
-                i += 1
-        j = 0
-        for file in os.listdir(h_planes_pc_dir):
-            if file.endswith('.tif'):
-                new_file = f'planarity{j + 1}'
-                os.rename(os.path.join(h_planes_pc_dir, file), os.path.join(h_planes_img_dir, new_file))
-                j += 1
-
-        # add renders to list
-        for img in os.listdir(h_planes_img_dir):
-            self.view_names.append(img)
-            self.view_paths.append(os.path.join(h_planes_img_dir, img))
-
-    def do_orient(self):
-        R = process.preproc_align_cloud(self.path, self.ransac_obj_folder, self.ransac_cloud_folder)
-        print(f'The point cloud has been rotated with {R} matrix...')
-
-        transformed_path = process.find_substring('TRANSFORMED', self.location_dir)
-        _, trans_file = os.path.split(transformed_path)
-        new_path = os.path.join(self.processed_data_dir, trans_file)
-        # move transformed file
-        os.rename(transformed_path, new_path)
-
-        self.path = new_path
-        self.update_dirs()
-        self.pc_load = o3d.io.read_point_cloud(self.path)
-        self.bound, self.bound_points, self.center, self.dim, _, _ = process.compute_basic_properties(self.pc_load,
-                                                                                                      save_bound_pc=True,
-                                                                                                      output_path_bound_pc=self.bound_pc_path)
-        if self.sub_sampled:
-            self.sub_pc_path
-
-    def do_ransac(self, min_factor=MIN_RANSAC_FACTOR):
-        self.sub_sampled = False
-        # create RANSAC directories
-        self.ransac_cloud_folder = os.path.join(self.processed_data_dir, 'RANSAC_pc')
-        process.new_dir(self.ransac_cloud_folder)
-
-        self.ransac_obj_folder = os.path.join(self.processed_data_dir, 'RANSAC_meshes')
-        process.new_dir(self.ransac_obj_folder)
-
-        # subsampling the point cloud if needed
-        self.sub_pc_path = os.path.join(self.processed_data_dir,
-                                        'subsampled.ply')  # path to the subsampled version of the point cloud
-
-        if self.n_points > POINT_LIM:  # if to many points --> Subsample
-            sub = self.pc_load.voxel_down_sample(VOXEL_DS)
-            o3d.io.write_point_cloud(self.sub_pc_path, sub)
-            self.sub_sampled = True
-        else:
-            shutil.copyfile(self.path, self.sub_pc_path)
-
-        if self.sub_sampled:
-            _, _, _, _, _, self.n_points_sub = process.compute_basic_properties(sub)
-            print(f'The subsampled point cloud has {self.n_points_sub} points')
-
-        # fixing RANSAC Parameters
-        if not self.sub_sampled:
-            points = self.n_points
-        else:
-            points = self.n_points_sub
-        min_points = points / min_factor
-        print(f'here are the minimum points {min_points}')
-
-        self.n_planes = process.preproc_ransac_short(self.sub_pc_path, min_points, RANSAC_DIST, self.ransac_obj_folder,
-                                                     self.ransac_cloud_folder)
-
-        self.ransac_done = True
 
 
 class SelectSegmentResult(QtWidgets.QDialog):
@@ -473,6 +168,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/yolo2.png'), self.actionDetect)
         self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
         self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
+        self.add_icon(res.find('img/profile.png'), self.actionLineMeas)
 
         self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
         self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
@@ -563,7 +259,7 @@ class SkyStock(QtWidgets.QMainWindow):
                 # self.viewer.add_yolo_box(name, x1,y1,x2,y2)
 
                 # create a new stock pile object
-                stock_obj = StockPileObject()
+                stock_obj = process.StockPileObject()
                 stock_obj.name = name
                 stock_obj.yolo_bbox = result
                 self.stocks_inventory.append(stock_obj)
@@ -711,7 +407,7 @@ class SkyStock(QtWidgets.QMainWindow):
             im4 = cv2.imread(dest_path4)
 
             # add object
-            stock_obj = StockPileObject()
+            stock_obj = process.StockPileObject()
             stock_obj.name = name
             stock_obj.yolo_bbox = yolo_type_bbox
 
@@ -975,7 +671,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.update_progress(text='Choose a functionality!')
 
     def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False):
-        cloud = NokPointCloud()
+        cloud = process.NokPointCloud()
         self.Nokclouds.append(cloud)  # note: self.Nokclouds[0] is always the original point cloud
 
         self.Nokclouds[-1].path = path
@@ -1015,6 +711,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionDetect.setEnabled(True)
         self.actionSelectPoint.setEnabled(True)
         self.actionHand_selector.setEnabled(True)
+        self.actionLineMeas.setEnabled(True)
 
     def on_tree_change(self):
         print('CHANGED!')

@@ -242,7 +242,7 @@
     <string>toolBar</string>
    </property>
    <property name="allowedAreas">
-    <set>Qt::LeftToolBarArea|Qt::RightToolBarArea</set>
+    <set>Qt::LeftToolBarArea|Qt::RightToolBarArea|Qt::TopToolBarArea</set>
    </property>
    <property name="orientation">
     <enum>Qt::Vertical</enum>
@@ -256,6 +256,8 @@
    <addaction name="actionLoad"/>
    <addaction name="actionHand_selector"/>
    <addaction name="actionCrop"/>
+   <addaction name="separator"/>
+   <addaction name="actionLineMeas"/>
    <addaction name="separator"/>
    <addaction name="actionSelectPoint"/>
    <addaction name="actionDetect"/>
@@ -345,6 +347,14 @@
    </property>
    <property name="text">
     <string>ShowInventory</string>
+   </property>
+  </action>
+  <action name="actionLineMeas">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>LineMeas</string>
    </property>
   </action>
  </widget>
