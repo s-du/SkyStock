@@ -8,6 +8,7 @@ from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtWidgets import *
 from PySide6.QtUiTools import QUiLoader
+from PIL import Image
 import sys
 import traceback
 
@@ -308,6 +309,27 @@ class Custom3dView:
         return gui.Widget.EventCallbackResult.IGNORED
 
 
+class TableModel(QAbstractTableModel):
+    def __init__(self, data):
+        super(TableModel, self).__init__()
+        self._data = data
+
+    def data(self, index, role):
+        if role == Qt.DisplayRole:
+            # See below for the nested-list data structure.
+            # .row() indexes into the outer list,
+            # .column() indexes into the sub-list
+            return self._data[index.row()][index.column()]
+
+    def rowCount(self, index):
+        # The length of the outer list.
+        return len(self._data)
+
+    def columnCount(self, index):
+        # The following takes the first sub-list, and returns
+        # the length (only works if all rows are an equal length)
+        return len(self._data[0])
+
 def QPixmapFromItem(item):
     """
     Transform a QGraphicsitem into a Pixmap
@@ -339,6 +361,123 @@ def QPixmapToArray(pixmap):
     img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w, h, 4))
 
     return img
+
+
+class DualViewer(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        # Create the main widget and layout
+        self.layout = QHBoxLayout()
+
+        # Create the QGraphicsView widgets
+        self.view1 = QGraphicsView()
+        self.view2 = QGraphicsView()
+        self.view1.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view1.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view2.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view2.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Create the QGraphicsScenes for each view
+        self.scene1 = QGraphicsScene()
+        self.scene2 = QGraphicsScene()
+
+        # Set the scenes for the views
+        self.view1.setScene(self.scene1)
+        self.view2.setScene(self.scene2)
+
+        # Connect the view1's zoom event to the zoom_views function
+        self.view1.wheelEvent = lambda event: self.zoom_views(event)
+        self.view2.wheelEvent = lambda event: self.zoom_views(event)
+
+        # Connect the view1's mouse events to the pan_views function
+        self.view1.mousePressEvent = lambda event: self.pan_views(event)
+        self.view1.mouseMoveEvent = lambda event: self.pan_views(event)
+        self.view1.mouseReleaseEvent = lambda event: self.pan_views(event)
+
+        # Add the views to the layout
+        self.layout.addWidget(self.view1)
+        self.layout.addWidget(self.view2)
+
+        # Set the central widget
+        self.setLayout(self.layout)
+
+        # Store the zoom scale for synchronization
+        self.zoom_scale = 1.0
+        self.pan_origin = QPointF()
+
+    def load_images_from_path(self, image_path1, image_path2):
+        im1 = Image.open(image_path1)
+        w1, _ = im1.size
+
+        im2 = Image.open(image_path2)
+        w2, _ = im2.size
+        self.ratio = w2 / w1
+
+        # Load the images from the file paths
+        pixmap1 = QPixmap(image_path1)
+        pixmap2 = QPixmap(image_path2)
+
+        # Clear the scenes
+        self.scene1.clear()
+        self.scene2.clear()
+
+        # Add the images to the respective scenes
+        self.scene1.addPixmap(pixmap1)
+        self.scene2.addPixmap(pixmap2)
+
+        # Fit the views to the images
+        self.view1.fitInView(self.scene1.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.view2.fitInView(self.scene2.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+        # Reset the zoom scale and pan origin
+        self.zoom_scale = 1.0
+        self.pan_origin = QPointF()
+
+    def zoom_views(self, event):
+        # Get the zoom factor from the wheel event
+        zoom_factor = 1.2 ** (event.angleDelta().y() / 120.0)
+        print(zoom_factor, self.ratio)
+
+        # Calculate the new zoom scale
+        self.zoom_scale *= zoom_factor
+
+        # Zoom view1
+        view1_transform = QTransform()
+        view1_transform.scale(self.zoom_scale, self.zoom_scale)
+        self.view1.setTransform(view1_transform)
+
+        # Zoom view2
+        view2_transform = QTransform()
+        view2_transform.scale(self.zoom_scale / self.ratio, self.zoom_scale / self.ratio)
+        self.view2.setTransform(view2_transform)
+
+    def pan_views(self, event):
+        if event.buttons() == Qt.MouseButtons.LeftButton:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                # Store the initial mouse position for panning
+                self.pan_origin = event.pos()
+            elif event.type() == QEvent.Type.MouseMove:
+                # Calculate the delta between the current and initial mouse position
+                delta = event.pos() - self.pan_origin
+
+                # Pan view1
+                view1_horizontal_scroll = self.view1.horizontalScrollBar()
+                view1_vertical_scroll = self.view1.verticalScrollBar()
+                view1_horizontal_scroll.setValue(view1_horizontal_scroll.value() - delta.x())
+                view1_vertical_scroll.setValue(view1_vertical_scroll.value() - delta.y())
+
+                # Pan view2
+                view2_horizontal_scroll = self.view2.horizontalScrollBar()
+                view2_vertical_scroll = self.view2.verticalScrollBar()
+                view2_horizontal_scroll.setValue(view2_horizontal_scroll.value() - delta.x())
+                view2_vertical_scroll.setValue(view2_vertical_scroll.value() - delta.y())
+
+                # Update the pan origin for the next mouse move
+                self.pan_origin = event.pos()
+            elif event.type() == event.MouseButtonRelease:
+                # Reset the pan origin
+                self.pan_origin = QPointF()
 
 
 class SimpleViewer(QGraphicsView):

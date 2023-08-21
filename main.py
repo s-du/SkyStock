@@ -175,6 +175,10 @@ class SkyStock(QtWidgets.QMainWindow):
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
 
+        # add dual viewer
+        self.dual_viewer = wid.DualViewer()
+        self.verticalLayout_4.addWidget(self.dual_viewer)
+
         # create connections (signals)
         self.create_connections()
 
@@ -729,6 +733,11 @@ class SkyStock(QtWidgets.QMainWindow):
         # store pc height data
         self.height_values = self.current_cloud.height_data
         self.viewer.set_height_data(self.height_values)
+
+        # add dual viewer images
+        img1 = self.current_cloud.view_paths[0]
+        img2 = self.current_cloud.view_paths[1]
+        self.dual_viewer.load_images_from_path(img1, img2)
 
         # enable action(s)
         self.actionCrop.setEnabled(True)
