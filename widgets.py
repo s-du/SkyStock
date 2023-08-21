@@ -1,6 +1,5 @@
 # standard libraries
 import logging
-import matplotlib.pyplot as plt
 import numpy as np
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
@@ -550,6 +549,12 @@ class PhotoViewer(QGraphicsView):
             elif isinstance(item, QGraphicsPolygonItem):
                 self._scene.removeItem(item)
 
+    def clean_scene_line(self):
+        for item in self._scene.items():
+            print(type(item))
+            if isinstance(item, QGraphicsLineItem):
+                self._scene.removeItem(item)
+
     def clean_scene_rectangle(self):
         for item in self._scene.items():
             print(type(item))
@@ -759,22 +764,22 @@ class PhotoViewer(QGraphicsView):
                 print('rectangle ROI added: ' + str(self.crop_coords))
             self._current_rect_item = None
             self.toggleDragMode()
+
         elif self.line_meas:
             self.line_meas = False
 
             if self._current_line_item is not None:
+                # compute line values
+                p1 = np.array([int(self.origin.x()), int(self.origin.y())])
+                p2 = np.array([int(self.new_coord.x()), int(self.new_coord.y())])
+                print(p1,p2)
+                line_values = createLineIterator(p1, p2, self.height_values)
+
+                self.line_values_final = line_values[:,2]
+
                 # emit signal (end of measure)
                 self.endDrawing_line_meas.emit()
                 print('Line meas. added')
-
-            # compute line values
-            p1 = np.array([int(self.origin.x()), int(self.origin.y())])
-            p2 = np.array([int(self.new_coord.x()), int(self.new_coord.y())])
-            print(p1,p2)
-            line_values = createLineIterator(p1, p2, self.height_values)
-            plt.plot(line_values[:,2])
-            plt.ylabel('Height [m]')
-            plt.show()
 
             self.origin = QPoint()
             self._current_line_item = None

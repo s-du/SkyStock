@@ -1,5 +1,7 @@
 from PySide6 import QtWidgets, QtGui, QtCore
 import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 import open3d as o3d
 import open3d.visualization.gui as gui
 import os
@@ -243,6 +245,14 @@ class SkyStock(QtWidgets.QMainWindow):
             self.viewer.toggleDragMode()
 
     def get_ground_profile(self):
+        values = self.viewer.line_values_final
+        x = np.linspace(0, len(values)*self.current_cloud.res/1000, num=len(values))
+        plt.plot(x,values, color=(1,0,1))
+        plt.axis('equal')
+        plt.ylabel('Height [m]')
+        plt.xlabel('Distance [m]')
+        plt.show()
+
         self.hand_pan()
 
     def go_yolo(self):
@@ -350,6 +360,8 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # redraw stocks
         process.delete_elements_by_indexes(self.stocks_inventory, to_pop)
+
+        # compute ground map (without stocks)
 
         self.viewer.clean_scene()
         self.viewer.add_list_infos(self.stocks_inventory)
@@ -746,6 +758,7 @@ class SkyStock(QtWidgets.QMainWindow):
         print('Reading the point cloud!')
         pc.do_preprocess()
 
+
         # 2. RANSAC DETECTION __________________________________________________________________________________
         if ransac:
             print('Launching RANSAC detection...')
@@ -762,10 +775,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # 4. GENERATE BASIC VIEWS_______________________________________________________
         print('Launching RGB render/exterior views creation...')
-        pc.standard_images()
-
-        # 5. GENERATE HEIGHT VIEWS
-        pc.height_images()
+        pc.image_selection()
 
     def on_img_combo_change(self):
         self.actionCrop.setEnabled(True)

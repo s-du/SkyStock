@@ -1,5 +1,6 @@
 import cv2
 import earthpy.spatial as es
+import earthpy.plot as ep
 import math
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -262,6 +263,7 @@ class NokPointCloud:
         print(f'The point cloud density is: {self.density:.3f}')
 
         if self.density < 0.05:  # if to many points --> Subsample
+            print('subsampling...')
             sub_pc_path = os.path.join(self.location_dir,
                                        'subsampled.ply')  # path to the subsampled version of the point cloud
             sub = self.pc_load.voxel_down_sample(0.05)
@@ -293,8 +295,47 @@ class NokPointCloud:
             o3d.io.write_triangle_mesh(self.poisson_mesh_path, mesh)
             self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
 
+    def image_selection(self):
+        self.res = round(self.density * 5, 3) * 1000
+        print(f'the image resolution is {self.res}')
+        raster_top_rgb_height_pcv(self.path, self.res / 1000)
+
+        # create new path for dtm
+        path_top = os.path.join(self.img_dir, 'top.tif')
+        path_pcv = os.path.join(self.img_dir, 'pcv.tif')
+        path_dtm = os.path.join(self.img_dir, 'dtm.tif')
+        path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
+        path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
+        path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
+        path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
+
+        self.view_names.extend(['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
+        self.view_paths.extend([path_top, path_pcv, path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
+
+        # relocate image file
+        img_list = generate_list('.tif', self.location_dir)
+        print(f'image list {img_list}')
+        os.rename(img_list[0], path_pcv)
+        os.rename(img_list[1], path_top)
+        os.rename(img_list[2], path_dtm)
+
+        # store height data
+        with rio.open(path_dtm) as src:
+            elevation = src.read(1)
+            # Set masked values to np.nan
+            elevation[elevation < 0] = np.nan
+            self.height_data = elevation
+
+        # process files
+        create_elevation(path_dtm, path_top_elevation, type='standard')
+        create_elevation(path_dtm, path_top_hillshade, type='hill')
+
+        create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
+                                     path_top_hybrid1, path_top_hybrid2)
+
     def standard_images(self):
         self.res = round(self.density * 5, 3) * 1000
+        print(f'the image resolution is {self.res}')
         raster_all_bound(self.path, self.res / 1000, self.bound_pc_path, xray=False)
 
         # create new images paths
@@ -372,7 +413,6 @@ class NokPointCloud:
 
             create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
                                                  path_top_hybrid1, path_top_hybrid2)
-
 
         else:
             print('Process standard images first!')
@@ -994,6 +1034,23 @@ def raster_single_bound_height(cloud_path, grid_step, dir_cc, bound_pc):
 
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + ' -O ' + cc_cloud_lim + function
+    cc_function(cloud_dir, function_name, fun_txt)
+
+def raster_top_rgb_height_pcv(cloud_path, grid_step):
+    (cloud_dir, cloudname) = os.path.split(cloud_path)
+    cc_cloud = '"' + cloud_path + '"'
+    proj = ' -SF_PROJ MAX -PROJ MAX'
+    add_pcv = ' -PCV -SF_CONVERT_TO_RGB FALSE -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_RGB'
+
+    function_name = 'raster'
+
+    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_RGB -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z' + add_pcv
+
+    # Prepare CloudCompare function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
     cc_function(cloud_dir, function_name, fun_txt)
 
 
@@ -1867,7 +1924,14 @@ def generate_summary_canva(image_list, name_list, dest_path):
     cv2.imwrite(dest_path, inventory_picture)
 
 def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_path1, dest_path2):
-    rgb = np.asarray(Image.open(rgb_path))
+    img = Image.open(rgb_path)
+    if img.mode == 'RGB':
+        # Convert the image to RGBA format
+        img_rgba = img.convert('RGBA')
+    else:
+        img_rgba = img
+
+    rgb = np.asarray(img_rgba)
     elevation = np.asarray(Image.open(elevation_path))
     hillshade = np.asarray(Image.open(hillshade_path))
 
@@ -1906,17 +1970,19 @@ def create_elevation(dtm_path, dest_path, type='standard'):
         elevation = src.read(1)
         # Set masked values to np.nan
         elevation[elevation < 0] = np.nan
+        print(elevation.shape)
 
     # Define a colormap (you can choose or create your own)
     cmap = plt.get_cmap("terrain")
 
-    hillshade = es.hillshade(elevation)
+    hillshade = es.hillshade(elevation,  altitude=10)
+    print(np.amin(elevation))
 
     # Plot the altitude data with the colormap
-    if type=='standard':
-        plt.imsave(fname=dest_path, arr=elevation, cmap=cmap)
+    if type =='standard':
+        plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
     elif type == 'hill':
-        plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys')
+        plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys', vmin=np.nanmin(hillshade), vmax=np.nanmax(hillshade))
 
     # Close the figure
     plt.close()
