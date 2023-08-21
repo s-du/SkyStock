@@ -2,14 +2,11 @@ from PySide6 import QtWidgets, QtGui, QtCore
 import cv2
 import open3d as o3d
 import open3d.visualization.gui as gui
-
-
 import os
-import shutil
-
 from pointify_engine import process
-import resources as res
 import widgets as wid
+
+import resources as res
 import test2
 
 from ultralytics import YOLO
@@ -29,8 +26,6 @@ model_path = res.find('other/last.pt')
 model = YOLO(model_path)  # load a custom model
 threshold = 0.5
 class_name_dict = {0: 'stock_pile', 1: 'vehicle', 2: 'building', 3: 'stock_with_wall', 4: 'in_construction'}
-
-
 
 
 
@@ -150,6 +145,7 @@ class SkyStock(QtWidgets.QMainWindow):
         ag.addAction(self.actionCrop)
         ag.addAction(self.actionHand_selector)
         ag.addAction(self.actionSelectPoint)
+        ag.addAction(self.actionLineMeas)
 
         # Create model (for the tree structure)
         self.model = QtGui.QStandardItemModel()
@@ -220,6 +216,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionSuperSam.triggered.connect(self.sam_chain)
         self.actionInfo.triggered.connect(self.show_info)
         self.actionShowInventory.triggered.connect(self.inventory_canva)
+        self.actionLineMeas.triggered.connect(self.line_meas)
 
         # toggle buttons
         self.pushButton_show_poly.clicked.connect(self.toggle_poly)
@@ -229,6 +226,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
         self.viewer.endDrawing_rect.connect(self.perform_crop)
         self.viewer.end_point_selection.connect(self.add_single_sam)
+        self.viewer.endDrawing_line_meas.connect(self.get_ground_profile)
 
         self.selmod.selectionChanged.connect(self.on_tree_change)
 
@@ -236,6 +234,16 @@ class SkyStock(QtWidgets.QMainWindow):
         dialog = AboutDialog()
         if dialog.exec_():
             pass
+
+    def line_meas(self):
+        if self.actionLineMeas.isChecked():
+
+            # activate drawing tool
+            self.viewer.line_meas = True
+            self.viewer.toggleDragMode()
+
+    def get_ground_profile(self):
+        self.hand_pan()
 
     def go_yolo(self):
         """
@@ -706,8 +714,13 @@ class SkyStock(QtWidgets.QMainWindow):
         self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         self.treeView.expandAll()
 
+        # store pc height data
+        self.height_values = self.current_cloud.height_data
+        self.viewer.set_height_data(self.height_values)
+
         # enable action(s)
         self.actionCrop.setEnabled(True)
+        self.actionLineMeas.setEnabled(True)
         self.actionDetect.setEnabled(True)
         self.actionSelectPoint.setEnabled(True)
         self.actionHand_selector.setEnabled(True)

@@ -245,6 +245,8 @@ class NokPointCloud:
         self.standard_im_done = False
         self.height_im_done = False
 
+        self.height_data = []
+
     def update_dirs(self):
         self.location_dir, self.file = os.path.split(self.path)
 
@@ -356,6 +358,13 @@ class NokPointCloud:
             # relocate image file
             img_list = generate_list('.tif', self.location_dir)
             os.rename(img_list[0], path_dtm)
+
+            # store height data
+            with rio.open(path_dtm) as src:
+                elevation = src.read(1)
+                # Set masked values to np.nan
+                elevation[elevation < 0] = np.nan
+                self.height_data = elevation
 
             # process files
             create_elevation(path_dtm, path_top_elevation, type='standard')

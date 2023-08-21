@@ -1,5 +1,6 @@
 # standard libraries
 import logging
+import matplotlib.pyplot as plt
 import numpy as np
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
@@ -14,7 +15,6 @@ import traceback
 # custom libraries
 from pointify_engine import process
 
-
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
 # basic logger functionality
@@ -22,16 +22,18 @@ log = logging.getLogger(__name__)
 handler = logging.StreamHandler(stream=sys.stdout)
 log.addHandler(handler)
 
+
 def show_exception_box(log_msg):
     """Checks if a QApplication instance is available and shows a messagebox with the exception message.
     If unavailable (non-console application), log an additional notice.
     """
     if QApplication.instance() is not None:
-            errorbox = QMessageBox()
-            errorbox.setText("Oops. An unexpected error occured:\n{0}".format(log_msg))
-            errorbox.exec_()
+        errorbox = QMessageBox()
+        errorbox.setText("Oops. An unexpected error occured:\n{0}".format(log_msg))
+        errorbox.exec_()
     else:
         log.debug("No QApplication instance available.")
+
 
 class UncaughtHook(QObject):
     _exception_caught = Signal(object)
@@ -123,7 +125,8 @@ class UiLoader(QUiLoader):
                     widget = self.customWidgets[class_name](parent)
 
                 except (TypeError, KeyError) as e:
-                    raise Exception('No custom widget ' + class_name + ' found in customWidgets param of UiLoader __init__.')
+                    raise Exception(
+                        'No custom widget ' + class_name + ' found in customWidgets param of UiLoader __init__.')
 
             if self.baseinstance:
                 # set an attribute for the new child widget on the base
@@ -132,7 +135,7 @@ class UiLoader(QUiLoader):
 
                 # this outputs the various widget names, e.g.
                 # sampleGraphicsView, dockWidget, samplesTableView etc.
-                #print(name)
+                # print(name)
 
             return widget
 
@@ -214,8 +217,6 @@ class Custom3dView:
         view_ctrls = gui.CollapsableVert("View controls", 0.25 * em,
                                          gui.Margins(em, 0, 0, 0))
 
-
-
         self.switch = gui.ToggleSwitch("Mesh/PC switch")
         self.switch.set_on_clicked(self.toggle_visibility)
         view_ctrls.add_child(self.switch)
@@ -235,8 +236,6 @@ class Custom3dView:
         # so since the text likely changed width, we need to
         # re-layout to set the new frame.
         self.window.set_needs_layout()
-
-
 
     def toggle_visibility(self, is_enabled):
         print('toggle')
@@ -260,14 +259,11 @@ class Custom3dView:
                 layout_context, gui.Widget.Constraints()).height)
 
         self.layout.frame = gui.Rect(r.get_right() - width, r.y, width,
-                                              height)
+                                     height)
 
         self.info.frame = gui.Rect(r.x,
                                    r.get_bottom() - pref.height, pref.width,
                                    pref.height)
-
-
-
 
     def _on_mouse_widget3d(self, event):
         # We could override BUTTON_DOWN without a modifier, but that would
@@ -329,6 +325,7 @@ def QPixmapFromItem(item):
     item.paint(painter, opt)  # here in some cases the self is needed
     return pixmap
 
+
 def QPixmapToArray(pixmap):
     ## Get the size of the current pixmap
     size = pixmap.size()
@@ -340,7 +337,7 @@ def QPixmapToArray(pixmap):
     byte_str = qimg.bits().tobytes()
 
     ## Using the np.frombuffer function to convert the byte string into an np array
-    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w,h,4))
+    img = np.frombuffer(byte_str, dtype=np.uint8).reshape((w, h, 4))
 
     return img
 
@@ -393,11 +390,86 @@ class SimpleViewer(QGraphicsView):
         rect = QRectF(left, top, w, h)
         self.fitInView(rect, Qt.KeepAspectRatio)
 
+def createLineIterator(P1, P2, img):
+    """
+    Source: https://stackoverflow.com/questions/32328179/opencv-3-0-lineiterator
+    Produces and array that consists of the coordinates and intensities of each pixel in a line between two points
+
+    Parameters:
+        -P1: a numpy array that consists of the coordinate of the first point (x,y)
+        -P2: a numpy array that consists of the coordinate of the second point (x,y)
+        -img: the image being processed
+
+    Returns:
+        -it: a numpy array that consists of the coordinates and intensities of each pixel in the radii (shape: [numPixels, 3], row = [x,y,intensity])
+    """
+    # define local variables for readability
+    imageH = img.shape[0]
+    imageW = img.shape[1]
+    P1X = P1[0]
+    P1Y = P1[1]
+    P2X = P2[0]
+    P2Y = P2[1]
+
+    # difference and absolute difference between points
+    # used to calculate slope and relative location between points
+    dX = P2X - P1X
+    dY = P2Y - P1Y
+    dXa = np.abs(dX)
+    dYa = np.abs(dY)
+
+    # predefine numpy array for output based on distance between points
+    itbuffer = np.empty(shape=(np.maximum(dYa, dXa), 3), dtype=np.float32)
+    itbuffer.fill(np.nan)
+
+    # Obtain coordinates along the line using a form of Bresenham's algorithm
+    negY = P1Y > P2Y
+    negX = P1X > P2X
+    if P1X == P2X:  # vertical line segment
+        itbuffer[:, 0] = P1X
+        if negY:
+            itbuffer[:, 1] = np.arange(P1Y - 1, P1Y - dYa - 1, -1)
+        else:
+            itbuffer[:, 1] = np.arange(P1Y + 1, P1Y + dYa + 1)
+    elif P1Y == P2Y:  # horizontal line segment
+        itbuffer[:, 1] = P1Y
+        if negX:
+            itbuffer[:, 0] = np.arange(P1X - 1, P1X - dXa - 1, -1)
+        else:
+            itbuffer[:, 0] = np.arange(P1X + 1, P1X + dXa + 1)
+    else:  # diagonal line segment
+        steepSlope = dYa > dXa
+        if steepSlope:
+            slope = dX.astype(np.float32) / dY.astype(np.float32)
+            if negY:
+                itbuffer[:, 1] = np.arange(P1Y - 1, P1Y - dYa - 1, -1)
+            else:
+                itbuffer[:, 1] = np.arange(P1Y + 1, P1Y + dYa + 1)
+            itbuffer[:, 0] = (slope * (itbuffer[:, 1] - P1Y)).astype(int) + P1X
+        else:
+            slope = dY.astype(np.float32) / dX.astype(np.float32)
+            if negX:
+                itbuffer[:, 0] = np.arange(P1X - 1, P1X - dXa - 1, -1)
+            else:
+                itbuffer[:, 0] = np.arange(P1X + 1, P1X + dXa + 1)
+            itbuffer[:, 1] = (slope * (itbuffer[:, 0] - P1X)).astype(int) + P1Y
+
+    # Remove points outside of image
+    colX = itbuffer[:, 0]
+    colY = itbuffer[:, 1]
+    itbuffer = itbuffer[(colX >= 0) & (colY >= 0) & (colX < imageW) & (colY < imageH)]
+
+    # Get intensities from img ndarray
+    itbuffer[:, 2] = img[itbuffer[:, 1].astype(int), itbuffer[:, 0].astype(int)]
+
+    return itbuffer
+
 
 class PhotoViewer(QGraphicsView):
     photoClicked = Signal(QPoint)
     endDrawing_rect = Signal()
     end_point_selection = Signal()
+    endDrawing_line_meas = Signal()
 
     def __init__(self, parent):
         super(PhotoViewer, self).__init__(parent)
@@ -416,11 +488,13 @@ class PhotoViewer(QGraphicsView):
 
         self.rect = False
         self.select_point = False
+        self.line_meas = False
 
         self.setMouseTracking(True)
         self.origin = QPoint()
 
         self._current_rect_item = None
+        self._current_line_item = None
         self._current_point = None
         self._current_path = None
 
@@ -515,7 +589,6 @@ class PhotoViewer(QGraphicsView):
             elif not self._photo.pixmap().isNull():
                 self.setDragMode(QGraphicsView.ScrollHandDrag)
 
-
     def add_poly(self, coordinates):
         # Create a QPolygonF from the coordinates
         polygon = QPolygonF()
@@ -535,12 +608,12 @@ class PhotoViewer(QGraphicsView):
         box = QGraphicsRectItem()
         box.setPen(self.pen_yolo)
 
-        r = QRectF(x1, y1, x2-x1, y2-y1)
+        r = QRectF(x1, y1, x2 - x1, y2 - y1)
         box.setRect(r)
 
         # add text
         text_item = QGraphicsTextItem()
-        text_item.setPos(x1,y1)
+        text_item.setPos(x1, y1)
         text_item.setHtml(
             "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
 
@@ -563,7 +636,7 @@ class PhotoViewer(QGraphicsView):
             # Add the QGraphicsPolygonItem to the scene
             self._scene.addItem(polygon_item)
 
-    def add_list_infos(self, list_objects, only_name = False):
+    def add_list_infos(self, list_objects, only_name=False):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             text = el.name
@@ -587,9 +660,6 @@ class PhotoViewer(QGraphicsView):
                     "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + " m²</div>")
                 self._scene.addItem(text_item2)
 
-
-
-
     def add_list_boxes(self, list_objects):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
@@ -604,7 +674,6 @@ class PhotoViewer(QGraphicsView):
             # add elements to scene
             self._scene.addItem(box)
 
-
     def get_coord(self, QGraphicsRect):
         rect = QGraphicsRect.rect()
         coord = [rect.topLeft(), rect.bottomRight()]
@@ -615,6 +684,10 @@ class PhotoViewer(QGraphicsView):
     def get_selected_point(self):
         print(self._current_point)
         return self._current_point
+
+    def set_height_data(self, height_data):
+        self.height_values = height_data
+        print(np.shape(np.array(height_data)))
 
     # mouse events
     def wheelEvent(self, event):
@@ -649,6 +722,15 @@ class PhotoViewer(QGraphicsView):
             self.select_point = False
             self.end_point_selection.emit()
 
+        elif self.line_meas:
+            self._current_line_item = QGraphicsLineItem()
+            self._current_line_item.setPen(self.pen_yolo)
+
+            self._scene.addItem(self._current_line_item)
+            self.origin = self.mapToScene(event.pos())
+
+            self._current_line_item.setLine(QLineF(self.origin, self.origin))
+
         else:
             if self._photo.isUnderMouse():
                 self.photoClicked.emit(self.mapToScene(event.pos()).toPoint())
@@ -660,6 +742,10 @@ class PhotoViewer(QGraphicsView):
                 new_coord = self.mapToScene(event.pos())
                 r = QRectF(self.origin, new_coord)
                 self._current_rect_item.setRect(r)
+        elif self.line_meas:
+            if self._current_line_item is not None:
+                self.new_coord = self.mapToScene(event.pos())
+                self._current_line_item.setLine(QLineF(self.origin, self.new_coord))
 
         super(PhotoViewer, self).mouseMoveEvent(event)
 
@@ -673,11 +759,25 @@ class PhotoViewer(QGraphicsView):
                 print('rectangle ROI added: ' + str(self.crop_coords))
             self._current_rect_item = None
             self.toggleDragMode()
+        elif self.line_meas:
+            self.line_meas = False
+
+            if self._current_line_item is not None:
+                # emit signal (end of measure)
+                self.endDrawing_line_meas.emit()
+                print('Line meas. added')
+
+            # compute line values
+            p1 = np.array([int(self.origin.x()), int(self.origin.y())])
+            p2 = np.array([int(self.new_coord.x()), int(self.new_coord.y())])
+            print(p1,p2)
+            line_values = createLineIterator(p1, p2, self.height_values)
+            plt.plot(line_values[:,2])
+            plt.ylabel('Height [m]')
+            plt.show()
+
+            self.origin = QPoint()
+            self._current_line_item = None
+            self.toggleDragMode()
 
         super(PhotoViewer, self).mouseReleaseEvent(event)
-
-
-
-
-
-
