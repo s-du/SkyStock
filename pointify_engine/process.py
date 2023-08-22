@@ -262,17 +262,18 @@ class NokPointCloud:
 
         print(f'The point cloud density is: {self.density:.3f}')
 
-        if self.density < 0.05:  # if to many points --> Subsample
-            print('subsampling...')
-            sub_pc_path = os.path.join(self.location_dir,
-                                       'subsampled.ply')  # path to the subsampled version of the point cloud
-            sub = self.pc_load.voxel_down_sample(0.05)
-            o3d.io.write_point_cloud(sub_pc_path, sub)
-            self.sub_sampled = True
-            self.density = 0.05
+    def do_subsampling(self):
+        print('subsampling...')
+        sub_pc_path = os.path.join(self.location_dir,
+                                   'subsampled.ply')  # path to the subsampled version of the point cloud
+        sub = self.pc_load.voxel_down_sample(0.05)
+        o3d.io.write_point_cloud(sub_pc_path, sub)
+        self.sub_sampled = True
+        self.density = 0.05
 
-            self.path = sub_pc_path
-            self.update_dirs()
+        # replace with subsampled version
+        self.path = sub_pc_path
+        self.update_dirs()
 
     def do_mesh(self):
         if self.pc_load:
@@ -296,7 +297,8 @@ class NokPointCloud:
             self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
 
     def image_selection(self):
-        self.res = round(self.density * 5, 3) * 1000
+        if self.res != 0:
+            self.res = round(self.density * 4, 3) * 1000
         print(f'the image resolution is {self.res}')
         raster_top_rgb_height_pcv(self.path, self.res / 1000)
 
@@ -1939,7 +1941,7 @@ def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_
     foreground_float = foreground.astype(float)  # Inputs to blend_modes need to be floats.
     background = elevation
     background_float = background.astype(float)
-    blended = hard_light(background_float, foreground_float, 0.7)
+    blended = hard_light(background_float, foreground_float, 1)
 
     blended_img = np.uint8(blended)
     blended_img_raw = Image.fromarray(blended_img)
@@ -1950,7 +1952,7 @@ def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_
     foreground_float = foreground.astype(float)  # Inputs to blend_modes need to be floats.
     background = rgb
     background_float = background.astype(float)
-    blended = hard_light(background_float, foreground_float, 0.7)
+    blended = hard_light(background_float, foreground_float, 1)
 
     blended_img = np.uint8(blended)
     blended_img_raw = Image.fromarray(blended_img)
@@ -1975,7 +1977,7 @@ def create_elevation(dtm_path, dest_path, type='standard'):
     # Define a colormap (you can choose or create your own)
     cmap = plt.get_cmap("terrain")
 
-    hillshade = es.hillshade(elevation,  altitude=10)
+    hillshade = es.hillshade(elevation,  altitude=0)
     print(np.amin(elevation))
 
     # Plot the altitude data with the colormap

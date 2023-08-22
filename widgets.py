@@ -179,6 +179,67 @@ def loadUi(uifile, baseinstance=None, customWidgets=None,
     return widget
 
 
+# CUSTOM SLIDER
+class CustomTickSlider(QSlider):
+    def __init__(self, dist_v, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.distinctive_tick_value = dist_v  # Value where distinctive tick should be
+        self.setStyleSheet("""
+                    QSlider::handle:horizontal {
+                        background: white; /* Set handle color */
+                        width: 10px;
+                        z-index: 1; /* Place handle in front of ticks */
+                    }
+
+                    QSlider::sub-page:horizontal {
+                        background: #00aaff; /* Color of the filled area */
+                    }
+
+                    QSlider::groove:horizontal {
+                        background: #ccc; /* Color of the unfilled area */
+                        border: none;
+                        height: 20px;
+                    }
+
+                    QSlider::add-page:horizontal {
+                        background: #ccc; /* Color of the area beyond handle */
+                    }
+                """)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        # Customize normal tick appearance
+        tick_height = 5
+        tick_color = Qt.darkGray
+
+        # Customize distinctive tick appearance
+        distinctive_tick_height = 50
+        distinctive_tick_color = Qt.red
+
+        handle_pos = self.style().sliderPositionFromValue(
+            self.minimum(), self.maximum(), self.value(), self.width()
+        )
+
+        for tick_value in range(self.minimum(), self.maximum() + 1):
+            tick_pos = self.style().sliderPositionFromValue(
+                self.minimum(), self.maximum(), tick_value, self.width()
+            )
+            if tick_value == self.distinctive_tick_value:
+
+                painter.setPen(QPen(distinctive_tick_color, 2))
+                painter.drawLine(tick_pos, 0, tick_pos, distinctive_tick_height)
+
+            else:
+                if tick_value % 20 == 0:  # Show normal tick every 10 values
+                    painter.setPen(QPen(tick_color, 2))
+                    painter.drawLine(tick_pos, 0, tick_pos, tick_height)
+
+
+
+
 # CUSTOM OPEN3D VIEWER
 class Custom3dView:
     def __init__(self, cloud, mesh, result):
