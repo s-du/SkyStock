@@ -845,7 +845,8 @@ class PhotoViewer(QGraphicsView):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             text = el.name
-            text2 = str(el.area)
+            text2 = str(round(el.area, 2)) + 'm² '
+            text3 = str(round(el.volume, 2)) + 'm³'
 
             print(f'adding {text} to viewer')
 
@@ -858,11 +859,11 @@ class PhotoViewer(QGraphicsView):
             self._scene.addItem(text_item)
 
             if not only_name:
-                # add text 2
+                # add text 2 and 3
                 text_item2 = QGraphicsTextItem()
                 text_item2.setPos(x1, y2)
                 text_item2.setHtml(
-                    "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + " m²</div>")
+                    "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + "<br>" + text3 + " </div>")
                 self._scene.addItem(text_item2)
 
     def add_list_boxes(self, list_objects):

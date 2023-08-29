@@ -4,6 +4,8 @@ import earthpy.plot as ep
 import math
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
+import copy
+
 
 import numpy as np
 import open3d as o3d
@@ -19,6 +21,7 @@ from shapely.geometry import Polygon
 from PIL import Image, ImageOps
 from PySide6 import QtCore, QtGui, QtWidgets
 from scipy.signal import find_peaks
+from scipy.interpolate import griddata
 
 from blend_modes import multiply, hard_light
 
@@ -137,6 +140,7 @@ class StockPileObject:
         self.mask_rgb_cropped = None
         self.coords = None
         self.area = 0
+        self.volume = 0
 
 
 class LineMeas:
@@ -327,6 +331,7 @@ class NokPointCloud:
             # Set masked values to np.nan
             elevation[elevation < 0] = np.nan
             self.height_data = elevation
+            self.ground_data = copy.deepcopy(self.height_data)
 
         # process files
         create_elevation(path_dtm, path_top_elevation, type='standard')
@@ -334,6 +339,9 @@ class NokPointCloud:
 
         create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
                                      path_top_hybrid1, path_top_hybrid2)
+
+    def reset_ground(self):
+        pass
 
     def standard_images(self):
         self.res = round(self.density * 5, 3) * 1000
@@ -1988,3 +1996,75 @@ def create_elevation(dtm_path, dest_path, type='standard'):
 
     # Close the figure
     plt.close()
+
+
+def create_ground_map(elevation, mask_array, dest_path):
+    tolerance_lower = 0
+    tolerance_upper = 10
+
+    # create a true intensity image
+    mask_array = mask_array[:, :, 2]
+    interest_mask = cv2.inRange(mask_array, tolerance_lower, tolerance_upper)
+
+    mask_non_zero_coords = np.argwhere(interest_mask != 0)
+    for coord in mask_non_zero_coords:
+        x, y = coord
+        elevation[x, y] = np.nan
+
+    # Coordinates of known (non-missing) pixels
+    known_coords = np.argwhere(~np.isnan(elevation))
+
+    # Values of known pixels
+    known_values = elevation[~np.isnan(elevation)]
+
+    # Coordinates of missing pixels
+    missing_coords = np.argwhere(np.isnan(elevation))
+
+    # Perform interpolation
+    interpolated_values = griddata(known_coords, known_values, missing_coords, method='nearest')
+
+    # Assign the interpolated values to the image array
+    for i in range(len(missing_coords)):
+        x, y = missing_coords[i]
+        elevation[x, y] = interpolated_values[i]
+
+    # save resulting plot and new elevation
+    cmap = plt.get_cmap("terrain")
+    plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
+
+def compute_volume(elevation, ground, mask_array, res):
+    """
+    plt.figure(figsize=(10, 20))  # Set the figure size (width, height) in inches
+    plt.imshow(elevation, cmap='terrain', origin='lower')  # Show the array, using a terrain colormap
+    plt.colorbar(label='Elevation')  # Add a color bar on the side, labeled "Elevation"
+    plt.title('Elevation Map')  # Add title
+    plt.xlabel('X Coordinate')  # X-axis label
+    plt.ylabel('Y Coordinate')  # Y-axis label
+    plt.show()
+
+    plt.figure(figsize=(10, 20))  # Set the figure size (width, height) in inches
+    plt.imshow(ground, cmap='terrain', origin='lower')  # Show the array, using a terrain colormap
+    plt.colorbar(label='Elevation')  # Add a color bar on the side, labeled "Elevation"
+    plt.title('Ground Map')  # Add title
+    plt.xlabel('X Coordinate')  # X-axis label
+    plt.ylabel('Y Coordinate')  # Y-axis label
+    plt.show()
+    """
+    tolerance_lower = 0
+    tolerance_upper = 10
+
+    # create a true intensity image
+    mask_array = mask_array[:, :, 2]
+    interest_mask = cv2.inRange(mask_array, tolerance_lower, tolerance_upper)
+
+    mask_non_zero_coords = np.argwhere(interest_mask != 0)
+
+    volume = 0
+    for coord in mask_non_zero_coords:
+        x, y = coord
+        z_diff = elevation[x,y] - ground[x,y]
+        print(f'z_diff:{z_diff}')
+        value = z_diff*res*res
+        volume += value
+
+    return volume

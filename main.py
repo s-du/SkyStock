@@ -280,7 +280,19 @@ class SkyStock(QtWidgets.QMainWindow):
         process.delete_elements_by_indexes(self.stocks_inventory, to_pop)
 
         # compute ground map (without stocks)
+        for i, stock_pile in enumerate(self.stocks_inventory):
+            mask = stock_pile.mask
 
+            dest_path = f'D:\Python2023\SAM_test\TEST\interp{i}.jpg'
+
+            process.create_ground_map(self.current_cloud.ground_data, mask, dest_path)
+
+            # compute volume of stock pile
+            stock_pile.volume = process.compute_volume(self.current_cloud.height_data, self.current_cloud.ground_data,
+                                                       mask, self.current_cloud.res/1000)
+
+
+        # add data to viewer
         self.viewer.clean_scene()
         self.viewer.add_list_infos(self.stocks_inventory)
         self.viewer.add_list_boxes(self.stocks_inventory)
