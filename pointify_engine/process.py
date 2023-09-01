@@ -6,6 +6,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import copy
 
+import dialogs as dia
 
 import numpy as np
 import open3d as o3d
@@ -250,7 +251,10 @@ class NokPointCloud:
         self.standard_im_done = False
         self.height_im_done = False
 
+        # dsm properties
         self.height_data = []
+        self.high_point = 0
+        self.low_point = 0
 
     def update_dirs(self):
         self.location_dir, self.file = os.path.split(self.path)
@@ -300,8 +304,26 @@ class NokPointCloud:
             o3d.io.write_triangle_mesh(self.poisson_mesh_path, mesh)
             self.mesh_load = o3d.io.read_triangle_mesh(self.poisson_mesh_path)
 
+
+    def recompute_elevation(self):
+        path_dtm = os.path.join(self.img_dir, 'dtm.tif')
+        path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
+        path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
+        path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
+        path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
+
+        # process files
+        create_elevation(path_dtm, path_top_elevation, high_limit=self.high_point, low_limit=self.low_point, type='standard')
+        create_elevation(path_dtm, path_top_hillshade, high_limit=self.high_point, low_limit=self.low_point, type='hill')
+
+        create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
+                                     path_top_hybrid1, path_top_hybrid2)
+
+    def create_height_distib(self):
+        pass
+
     def image_selection(self):
-        if self.res != 0:
+        if self.res == 0:
             self.res = round(self.density * 4, 3) * 1000
         print(f'the image resolution is {self.res}')
         raster_top_rgb_height_pcv(self.path, self.res / 1000)
@@ -332,6 +354,14 @@ class NokPointCloud:
             elevation[elevation < 0] = np.nan
             self.height_data = elevation
             self.ground_data = copy.deepcopy(self.height_data)
+
+            # call height mod
+            dialog = dia.MySliderDemo(self.height_data)
+
+            if dialog.exec_():
+                self.low_point = dialog.slider_low.value()
+                self.high_point = dialog.slider_high.value()
+
 
         # process files
         create_elevation(path_dtm, path_top_elevation, type='standard')
@@ -1968,7 +1998,7 @@ def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_
     blended_img_raw.save(dest_path2)
 
 
-def create_elevation(dtm_path, dest_path, type='standard'):
+def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='standard'):
     """
 
     :param dtm_path: path to the DTM as a tif
@@ -1980,7 +2010,13 @@ def create_elevation(dtm_path, dest_path, type='standard'):
         elevation = src.read(1)
         # Set masked values to np.nan
         elevation[elevation < 0] = np.nan
-        print(elevation.shape)
+
+    # filter values
+    if low_limit != 0:
+        elevation[elevation <= low_limit] = low_limit
+
+    if low_limit != 0:
+        elevation[elevation >= high_limit] = high_limit
 
     # Define a colormap (you can choose or create your own)
     cmap = plt.get_cmap("terrain")
@@ -1998,7 +2034,7 @@ def create_elevation(dtm_path, dest_path, type='standard'):
     plt.close()
 
 
-def create_ground_map(elevation, mask_array, dest_path):
+def create_ground_map(elevation, mask_array, dest_path=''):
     tolerance_lower = 0
     tolerance_upper = 10
 
@@ -2030,7 +2066,7 @@ def create_ground_map(elevation, mask_array, dest_path):
 
     # save resulting plot and new elevation
     cmap = plt.get_cmap("terrain")
-    plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
+    # plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
 
 def compute_volume(elevation, ground, mask_array, res):
     """

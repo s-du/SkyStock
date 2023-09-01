@@ -55,6 +55,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.nb_roi = 0
         self.nb_seg_cloud = 0
 
+        self.stocks_inventory = []
+
         # add actions to action group
         ag = QtGui.QActionGroup(self)
         ag.setExclusive(True)
@@ -81,6 +83,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
         self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
         self.add_icon(res.find('img/profile.png'), self.actionLineMeas)
+        self.add_icon(res.find('img/alti.png'), self.actionCropHeight)
 
         self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
         self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
@@ -137,6 +140,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionInfo.triggered.connect(self.show_info)
         self.actionShowInventory.triggered.connect(self.inventory_canva)
         self.actionLineMeas.triggered.connect(self.line_meas)
+        self.actionCropHeight.triggered.connect(self.change_altitude_limits)
 
         # toggle buttons
         self.pushButton_show_poly.clicked.connect(self.toggle_poly)
@@ -162,6 +166,14 @@ class SkyStock(QtWidgets.QMainWindow):
             self.viewer.line_meas = True
             self.viewer.toggleDragMode()
 
+
+    def change_altitude_limits(self):
+        dialog = dia.MySliderDemo(self.current_cloud.height_data)
+
+        if dialog.exec_():
+            self.current_cloud.low_point = dialog.slider_low.value()
+            self.current_cloud.high_point = dialog.slider_high.value()
+
     def get_ground_profile(self):
         values = self.viewer.line_values_final
         x = np.linspace(0, len(values)*self.current_cloud.res/1000, num=len(values))
@@ -181,8 +193,6 @@ class SkyStock(QtWidgets.QMainWindow):
         img = self.current_cloud.view_paths[0] # the first element is the top view
         results = model(img)[0]
         count = 1
-
-        self.stocks_inventory = []
 
         for result in results.boxes.data.tolist():
             x1, y1, x2, y2, score, class_id = result
@@ -283,9 +293,9 @@ class SkyStock(QtWidgets.QMainWindow):
         for i, stock_pile in enumerate(self.stocks_inventory):
             mask = stock_pile.mask
 
-            dest_path = f'D:\Python2023\SAM_test\TEST\interp{i}.jpg'
+            # dest_path = f'D:\Python2023\SAM_test\TEST\interp{i}.jpg'
 
-            process.create_ground_map(self.current_cloud.ground_data, mask, dest_path)
+            process.create_ground_map(self.current_cloud.ground_data, mask)
 
             # compute volume of stock pile
             stock_pile.volume = process.compute_volume(self.current_cloud.height_data, self.current_cloud.ground_data,
@@ -635,6 +645,8 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(self.Nokclouds[-1].folder)
         process.new_dir(self.Nokclouds[-1].processed_data_dir)
         process.new_dir(self.Nokclouds[-1].img_dir)
+
+        # generate all basic data
         self.process_pointcloud(self.Nokclouds[-1], orient=orient, ransac=ransac, mesh=mesh)
 
         # add element to treeview
@@ -700,7 +712,9 @@ class SkyStock(QtWidgets.QMainWindow):
         img_4 = res.find('img/20cm.png')
         list_img = [img_1, img_2, img_3, img_4]
 
-        dialog = dia.SelectGsd(list_img, 0.05)
+        density = pc.density
+
+        dialog = dia.SelectGsd(list_img, density)
         dialog.setWindowTitle("Select best output")
 
         if dialog.exec_():

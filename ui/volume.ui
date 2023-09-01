@@ -367,6 +367,7 @@ border-radius: 10px;
    <addaction name="actionLoad"/>
    <addaction name="actionHand_selector"/>
    <addaction name="actionCrop"/>
+   <addaction name="actionCropHeight"/>
    <addaction name="separator"/>
    <addaction name="actionLineMeas"/>
    <addaction name="separator"/>
@@ -469,6 +470,14 @@ border-radius: 10px;
    </property>
    <property name="text">
     <string>LineMeas</string>
+   </property>
+  </action>
+  <action name="actionCropHeight">
+   <property name="text">
+    <string>CropHeight</string>
+   </property>
+   <property name="toolTip">
+    <string>Change min and max altitude</string>
    </property>
   </action>
  </widget>

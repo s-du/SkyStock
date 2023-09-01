@@ -2,6 +2,93 @@ import os
 from PySide6 import QtWidgets, QtGui, QtCore
 import resources as res
 import widgets as wid
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+
+class MyCanvas(FigureCanvas):
+    def __init__(self, parent=None, data=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(111)
+        super(MyCanvas, self).__init__(fig)
+
+        self.data = data
+        self.colormap = 'viridis'
+        self.contour_mode = False
+        self.set_data()
+
+    def set_data(self):
+        if self.contour_mode:
+            self.axes.contour(self.data, cmap=self.colormap)
+        else:
+            self.axes.imshow(self.data, cmap=self.colormap)
+        self.draw()
+
+    def update_plot(self, low, high, colormap, contour_mode):
+        self.axes.cla()
+        if contour_mode:
+            self.axes.contour(self.data, cmap=colormap)
+            self.axes.set_ylim(self.axes.get_ylim()[::-1])
+        else:
+            self.axes.imshow(self.data, cmap=colormap, vmin=low, vmax=high)
+        self.draw()
+
+class MySliderDemo(QtWidgets.QDialog):
+    def __init__(self, data, parent=None):
+        super(MySliderDemo, self).__init__(parent)
+
+        self.data = data
+        min_data, max_data = np.nanmin(data), np.nanmax(data)
+
+        self.canvas = MyCanvas(data=self.data)
+
+        layout = QtWidgets.QVBoxLayout()
+
+        self.slider_low = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_low.setMinimum(int(min_data))
+        self.slider_low.setMaximum(int(max_data))
+        self.slider_low.setValue(int(min_data))
+
+        self.slider_high = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_high.setMinimum(int(min_data))
+        self.slider_high.setMaximum(int(max_data))
+        self.slider_high.setValue(int(max_data))
+
+        self.combo_colormap = QtWidgets.QComboBox()
+        self.combo_colormap.addItems(['viridis', 'plasma', 'inferno', 'magma', 'cividis'])
+
+        self.checkbox_contour = QtWidgets.QCheckBox('Contour Mode')
+        self.checkbox_contour.setChecked(False)
+
+        layout.addWidget(QtWidgets.QLabel(f'Low Limit ({int(min_data)} to {int(max_data)}):'))
+        layout.addWidget(self.slider_low)
+        layout.addWidget(QtWidgets.QLabel(f'High Limit ({int(min_data)} to {int(max_data)}):'))
+        layout.addWidget(self.slider_high)
+        layout.addWidget(QtWidgets.QLabel('Colormap:'))
+        layout.addWidget(self.combo_colormap)
+        layout.addWidget(self.checkbox_contour)
+        layout.addWidget(self.canvas)
+
+        self.buttonBox = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+        layout.addWidget(self.buttonBox)
+
+        self.slider_low.valueChanged.connect(self.update_plot)
+        self.slider_high.valueChanged.connect(self.update_plot)
+        self.combo_colormap.currentTextChanged.connect(self.update_plot)
+        self.checkbox_contour.stateChanged.connect(self.update_plot)
+
+        self.setLayout(layout)
+
+    def update_plot(self):
+        low = self.slider_low.value()
+        high = self.slider_high.value()
+        colormap = self.combo_colormap.currentText()
+        contour_mode = self.checkbox_contour.isChecked()
+        self.canvas.update_plot(low, high, colormap, contour_mode)
+
 
 
 class SelectGsd(QtWidgets.QDialog):
@@ -11,7 +98,6 @@ class SelectGsd(QtWidgets.QDialog):
         basename = 'gsd'
         uifile = os.path.join(basepath, 'ui/%s.ui' % basename)
         wid.loadUi(uifile, self)
-
 
         self.list_img = list_img
         self.value = 0.02
