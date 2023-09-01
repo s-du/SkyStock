@@ -4,6 +4,7 @@ import resources as res
 import widgets as wid
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -26,12 +27,16 @@ class MyCanvas(FigureCanvas):
         self.draw()
 
     def update_plot(self, low, high, colormap, contour_mode):
+        cmap = plt.cm.get_cmap(colormap)
+        cmap.set_over('w')
+        cmap.set_under('w')
+
         self.axes.cla()
         if contour_mode:
-            self.axes.contour(self.data, cmap=colormap)
+            self.axes.contour(self.data, cmap=cmap, vmin=low, vmax=high)
             self.axes.set_ylim(self.axes.get_ylim()[::-1])
         else:
-            self.axes.imshow(self.data, cmap=colormap, vmin=low, vmax=high)
+            self.axes.imshow(self.data, cmap=cmap, vmin=low, vmax=high)
         self.draw()
 
 class MySliderDemo(QtWidgets.QDialog):
@@ -41,19 +46,29 @@ class MySliderDemo(QtWidgets.QDialog):
         self.data = data
         min_data, max_data = np.nanmin(data), np.nanmax(data)
 
+        # Calculate the single step value as 1/20 of the range
+        single_step_value = ((max_data - min_data) / 20)*10
+        print(single_step_value)
+
+
         self.canvas = MyCanvas(data=self.data)
 
         layout = QtWidgets.QVBoxLayout()
 
         self.slider_low = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider_low.setMinimum(int(min_data))
-        self.slider_low.setMaximum(int(max_data))
-        self.slider_low.setValue(int(min_data))
+        self.slider_low.setMinimum(min_data*10)
+        self.slider_low.setSingleStep(single_step_value)
+        self.slider_low.setMaximum(max_data*10)
+        self.slider_low.setValue(min_data*10)
 
         self.slider_high = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider_high.setMinimum(int(min_data))
-        self.slider_high.setMaximum(int(max_data))
-        self.slider_high.setValue(int(max_data))
+        self.slider_high.setMinimum(min_data*10)
+        self.slider_high.setMaximum(max_data*10)
+        self.slider_high.setSingleStep(single_step_value)
+        self.slider_high.setValue(max_data*10)
+
+        self.label_low = QtWidgets.QLabel(f'Low Limit: {round(min_data,2)}')
+        self.label_high = QtWidgets.QLabel(f'High Limit: {round(max_data, 2)}')
 
         self.combo_colormap = QtWidgets.QComboBox()
         self.combo_colormap.addItems(['viridis', 'plasma', 'inferno', 'magma', 'cividis'])
@@ -61,9 +76,10 @@ class MySliderDemo(QtWidgets.QDialog):
         self.checkbox_contour = QtWidgets.QCheckBox('Contour Mode')
         self.checkbox_contour.setChecked(False)
 
-        layout.addWidget(QtWidgets.QLabel(f'Low Limit ({int(min_data)} to {int(max_data)}):'))
+        layout.addWidget(self.label_low)
         layout.addWidget(self.slider_low)
-        layout.addWidget(QtWidgets.QLabel(f'High Limit ({int(min_data)} to {int(max_data)}):'))
+
+        layout.addWidget(self.label_high)
         layout.addWidget(self.slider_high)
         layout.addWidget(QtWidgets.QLabel('Colormap:'))
         layout.addWidget(self.combo_colormap)
@@ -75,7 +91,10 @@ class MySliderDemo(QtWidgets.QDialog):
         self.buttonBox.rejected.connect(self.reject)
         layout.addWidget(self.buttonBox)
 
+        self.slider_low.valueChanged.connect(self.update_label_low)
         self.slider_low.valueChanged.connect(self.update_plot)
+
+        self.slider_high.valueChanged.connect(self.update_label_high)
         self.slider_high.valueChanged.connect(self.update_plot)
         self.combo_colormap.currentTextChanged.connect(self.update_plot)
         self.checkbox_contour.stateChanged.connect(self.update_plot)
@@ -83,11 +102,23 @@ class MySliderDemo(QtWidgets.QDialog):
         self.setLayout(layout)
 
     def update_plot(self):
-        low = self.slider_low.value()
-        high = self.slider_high.value()
+        low = self.slider_low.value()/10
+        high = self.slider_high.value()/10
         colormap = self.combo_colormap.currentText()
         contour_mode = self.checkbox_contour.isChecked()
         self.canvas.update_plot(low, high, colormap, contour_mode)
+
+    def update_label_low(self):
+        value = self.slider_low.value()/10
+        self.label_low.setText(f'Low Limit: {value}')
+        if value*10 >= self.slider_high.value():
+            self.slider_low.setValue(self.slider_high.value())
+
+    def update_label_high(self):
+        value = self.slider_high.value()/10
+        self.label_high.setText(f'High Limit: {value}')
+        if value*10 <= self.slider_low.value():
+            self.slider_high.setValue(self.slider_low.value())
 
 
 
