@@ -365,6 +365,8 @@ border-radius: 10px;
     <bool>false</bool>
    </attribute>
    <addaction name="actionLoad"/>
+   <addaction name="actionPhotogr"/>
+   <addaction name="separator"/>
    <addaction name="actionHand_selector"/>
    <addaction name="actionCrop"/>
    <addaction name="actionCropHeight"/>
@@ -380,6 +382,9 @@ border-radius: 10px;
   <action name="actionLoad">
    <property name="text">
     <string>Load</string>
+   </property>
+   <property name="toolTip">
+    <string>Load a point cloud</string>
    </property>
   </action>
   <action name="actionSelectPoint">
@@ -478,6 +483,14 @@ border-radius: 10px;
    </property>
    <property name="toolTip">
     <string>Change min and max altitude</string>
+   </property>
+  </action>
+  <action name="actionPhotogr">
+   <property name="text">
+    <string>Photogr</string>
+   </property>
+   <property name="toolTip">
+    <string>Create point cloud from images</string>
    </property>
   </action>
  </widget>

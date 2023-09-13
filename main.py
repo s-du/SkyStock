@@ -76,6 +76,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # Add icons to buttons
         self.add_icon(res.find('img/cloud.png'), self.actionLoad)
+        self.add_icon(res.find('img/folder.png'), self.actionPhotogr)
         self.add_icon(res.find('img/point.png'), self.actionSelectPoint)
         self.add_icon(res.find('img/crop.png'), self.actionCrop)
         self.add_icon(res.find('img/hand.png'), self.actionHand_selector)
