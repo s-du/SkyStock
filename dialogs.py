@@ -239,7 +239,7 @@ class AboutDialog(QtWidgets.QDialog):
         self.setFixedSize(300, 300)
         self.layout = QtWidgets.QVBoxLayout()
 
-        about_text = QtWidgets.QLabel('This app was made by Buildwise, to analyze roofs and their deformation.')
+        about_text = QtWidgets.QLabel('This app was made by Buildwise, to detect stockpiles and create detailed inventories.')
         about_text.setWordWrap(True)
 
         logos1 = QtWidgets.QLabel()

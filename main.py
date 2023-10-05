@@ -14,6 +14,8 @@ import dialogs as dia
 
 """
 TODO's
+- Change data viz in center of piles
+- Create stockpiles objects and show them in the treeview
 - Implement progress bar
 - Clear viewer when changing view
 - Create class for each stock pile object
@@ -21,6 +23,8 @@ TODO's
     - A giant map with all footprints
 
 """
+# SAM
+USE_FASTSAM = False
 
 # YOLO parameters
 model_path = res.find('other/last.pt')
@@ -241,7 +245,9 @@ class SkyStock(QtWidgets.QMainWindow):
             process.new_dir(seg_dir)
             list_img = []
 
-            test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+            if not USE_FASTSAM:
+                test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+
             for file in os.listdir(seg_dir):
                 fileloc = os.path.join(seg_dir, file)
                 list_img.append(fileloc)
