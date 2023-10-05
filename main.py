@@ -222,6 +222,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.viewer.add_list_boxes(self.stocks_inventory)
         self.viewer.add_list_infos(self.stocks_inventory, only_name=True)
 
+        # add objects to the triewview
+
         # enable super sam
         self.actionSuperSam.setEnabled(True)
         self.actionDetect.setEnabled(False) # TODO: allow the user to re-run YOLO
@@ -314,6 +316,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.viewer.add_list_infos(self.stocks_inventory)
         self.viewer.add_list_boxes(self.stocks_inventory)
         self.viewer.add_list_poly(self.stocks_inventory)
+
+        # update treeview
 
         # enabled viewers buttons
         self.pushButton_show_poly.setEnabled(True)

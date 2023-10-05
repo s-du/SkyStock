@@ -1821,12 +1821,14 @@ def convert_mask_polygon(image_path, original_rgb, dest_poly_path, dest_crop_pol
     # Find the bounding box of the filled contour
     x, y, w, h = cv2.boundingRect(largest_contour)
 
-    # Add a 10-pixel margin around the bounding box
+    # Define the desired margin
     margin = 10
-    x -= margin
-    y -= margin
-    w += 2 * margin
-    h += 2 * margin
+
+    # Adjust the margin for x, y, w, h to ensure they stay within the image bounds
+    x = max(x - margin, 0)
+    y = max(y - margin, 0)
+    w = min(w + 2 * margin, output_image.shape[1] - x)
+    h = min(h + 2 * margin, output_image.shape[0] - y)
 
     # Crop the image to the bounding box with the margin
     cropped_poly = output_image[y:y + h, x:x + w]
