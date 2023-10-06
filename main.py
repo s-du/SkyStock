@@ -262,6 +262,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.create_point_cloud_object(path, 'Original_point_cloud')
 
         self.update_progress(text='Choose a functionality!')
+        self.actionLoad.setEnabled(False)
 
     def show_info(self):
         dialog = dia.AboutDialog()
@@ -680,13 +681,14 @@ class SkyStock(QtWidgets.QMainWindow):
         center = bound.get_center()
         dim = bound.get_extent()
 
-        if self.current_view == 'top':
-            pt1 = [center[0] - dim[0] / 2 + start_x, center[1] + dim[1] / 2 - start_y, center[2] - dim[2] / 2]
-            pt2 = [pt1[0] + (end_x - start_x), pt1[1] - (end_y - start_y), center[2] + dim[2] / 2]
-            np_points = [pt1, pt2]
-            points = o3d.utility.Vector3dVector(np_points)
-            orientation = "top"
 
+        pt1 = [center[0] - dim[0] / 2 + start_x, center[1] + dim[1] / 2 - start_y, center[2] - dim[2] / 2]
+        pt2 = [pt1[0] + (end_x - start_x), pt1[1] - (end_y - start_y), center[2] + dim[2] / 2]
+        np_points = [pt1, pt2]
+        points = o3d.utility.Vector3dVector(np_points)
+        orientation = "top"
+
+        """
         elif self.current_view == 'front':
             pt1 = [center[0] - dim[0] / 2 + start_x, center[1] - dim[1] / 2, center[2] + dim[2] / 2 - start_y]
             pt2 = [pt1[0] + (end_x - start_x), center[1] + dim[1] / 2, pt1[2] - (end_y - start_y)]
@@ -700,6 +702,7 @@ class SkyStock(QtWidgets.QMainWindow):
             np_points = [pt1, pt2]
             points = o3d.utility.Vector3dVector(np_points)
             orientation = "front"
+        """
 
         crop_box = o3d.geometry.AxisAlignedBoundingBox
         crop_box = crop_box.create_from_points(points)
@@ -709,7 +712,7 @@ class SkyStock(QtWidgets.QMainWindow):
         o3d.io.write_point_cloud(roi_path, point_cloud_crop)
 
         # create new point cloud
-        self.create_point_cloud_object(roi_path, f'roi{self.nb_roi}', orient=False, ransac=False)
+        self.create_point_cloud_object(roi_path, f'crop_{self.nb_roi}', orient=False, ransac=False, keep_previous=False)
         process.basic_vis_creation(point_cloud_crop, orientation)
 
         self.viewer.clean_scene()
@@ -756,8 +759,11 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.update_progress(text='Choose a functionality!')
 
-    def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False):
+    def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False, keep_previous=True):
         cloud = process.NokPointCloud()
+        if not keep_previous:
+            self.Nokclouds = []
+
         self.Nokclouds.append(cloud)  # note: self.Nokclouds[0] is always the original point cloud
 
         self.Nokclouds[-1].path = path

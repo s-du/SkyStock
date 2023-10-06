@@ -748,6 +748,8 @@ class PhotoViewer(QGraphicsView):
                 self._scene.removeItem(item)
             elif isinstance(item, QGraphicsPolygonItem):
                 self._scene.removeItem(item)
+            elif isinstance(item, QGraphicsLineItem):
+                self._scene.removeItem(item)
 
     def clean_scene_line(self):
         for item in self._scene.items():
