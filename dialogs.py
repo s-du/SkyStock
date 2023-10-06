@@ -39,6 +39,99 @@ class MyCanvas(FigureCanvas):
             self.axes.imshow(self.data, cmap=cmap, vmin=low, vmax=high)
         self.draw()
 
+
+class Pyodm(QtWidgets.QDialog):
+    """
+    Dialog class for the Photogrammetry part.
+    """
+
+    def __init__(self, out_dir, param_list, parent=None):
+        """
+        Function to initialize the class
+        :param parent:
+        """
+        super(Pyodm, self).__init__(parent)
+
+        # load the ui
+        basepath = os.path.dirname(__file__)
+        basename = 'pyodm'
+        uifile = os.path.join(basepath, 'ui/%s.ui' % basename)
+        print(uifile)
+        wid.loadUi(uifile, self)
+        self.setWindowTitle('Create point cloud from images')
+
+        # initializaing variables for batch operations
+        self.out_dir = ''
+        self.current_object_name = ''
+
+        # initialize bar
+        self.update_progress(nb=100, text='Add some photos!')
+
+        # combobox
+        quality_list = param_list
+
+        self.comboBox_quality.addItems(quality_list)
+        self.comboBox_features.addItems(quality_list)
+
+        # add custom list view
+        self.listview = wid.TestListView(self)
+        self.listview.dropped.connect(self.picture_dropped)
+        item = QtWidgets.QListWidgetItem('Drag photos here!', self.listview)
+        self.verticalLayout.addWidget(self.listview)
+
+        # create variable to store images and point clouds
+        self.img_list = []
+
+        # get output directory (for all files)
+        self.out_dir = out_dir
+
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+    def picture_dropped(self, l):
+        for i, url in enumerate(l):
+            if os.path.exists(url):
+                print(url)
+                self.update_progress(nb=0+i*(100/len(l)), text=f'processing image {i}/{str(len(l))}')
+                if url.endswith('.JPG') or url.endswith('.jpg') or url.endswith('png'):
+                    if url not in self.img_list:
+                        self.img_list.append(url)
+                        icon = QtGui.QIcon(url)
+                        pixmap = icon.pixmap(72, 72)
+                        icon = QtGui.QIcon(pixmap)
+                        item = QtWidgets.QListWidgetItem(url, self.listview)
+                        item.setIcon(icon)
+                        item.setStatusTip(url)
+
+                else:
+                    msg = QtWidgets.QMessageBox()
+                    msg.setIcon(QtWidgets.QMessageBox.Information)
+
+                    msg.setText("Please add jpg or png pictures!")
+                    returnValue = msg.exec()
+                    break
+
+        self.update_progress(nb=100, text='Press OK if ready!')
+        if len(self.img_list) > 0:
+            if self.listview.item(0).text() == 'Drag photos here!':
+                self.listview.model().removeRow(0)
+
+        if len(self.img_list) > 2:
+            print('... the following images will be processed: \n', self.img_list)
+
+    def update_progress(self, nb=None, text=''):
+        self.label_status.setText(text)
+        if nb is not None:
+            self.progressBar.setProperty("value", nb)
+
+            # hide progress bar when 100%
+            if nb >= 100:
+                self.progressBar.setVisible(False)
+            elif self.progressBar.isHidden():
+                self.progressBar.setVisible(True)
+
+
+
 class MySliderDemo(QtWidgets.QDialog):
     def __init__(self, data, parent=None):
         super(MySliderDemo, self).__init__(parent)

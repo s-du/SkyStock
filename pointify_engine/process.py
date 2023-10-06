@@ -21,10 +21,13 @@ import subprocess
 from shapely.geometry import Polygon
 from PIL import Image, ImageOps
 from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtCore import Signal, QRunnable, QObject, QProcess, QThread
+
 from scipy.signal import find_peaks
 from scipy.interpolate import griddata
 
 from blend_modes import multiply, hard_light
+import resources as res
 
 # PARAMETERS
 CC_PATH = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
@@ -44,6 +47,37 @@ SPHERE_MAX = 1
 
 # Planar analysis
 SPAN = 0.03
+
+# ODM
+ODM_PATH = r'D:\Python2023\PyODM\resources\ODM\run.bat'
+ODM_DEFAULT_MESH_OCTREE_LIST = [8,9,10,11,12]
+ODM_DEFAULT_PC_QUALITY_LIST = ['low', 'medium', 'high', 'ultra']
+# TODO: add estimation of computation time depending on quality
+
+
+class ODMThread(QThread):
+    outputSignal = Signal(str)
+    finishedSignal = Signal()
+
+    def __init__(self, project_path, feature_qual, pc_qual):
+        super().__init__()
+        self.feat_qual = feature_qual
+        self.pc_qual = pc_qual
+        self.project_path = project_path
+
+    def run(self):
+        path = ODM_PATH
+        cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--end-with', 'odm_filterpoints']
+
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True)
+
+        # Read the output line by line
+        for line in iter(process.stdout.readline, ""):
+            self.outputSignal.emit(line)
+
+        process.stdout.close()
+        process.wait()
+        self.finishedSignal.emit()
 
 class RunnerSignals(QtCore.QObject):
     progressed = QtCore.Signal(int)
@@ -142,6 +176,7 @@ class StockPileObject:
         self.coords = None
         self.area = 0
         self.volume = 0
+        self.to_check = True # if initiated from YOLO, needs to be checked by user
 
 
 class LineMeas:

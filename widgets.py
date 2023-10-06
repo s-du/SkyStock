@@ -238,8 +238,6 @@ class CustomTickSlider(QSlider):
                     painter.drawLine(tick_pos, 0, tick_pos, tick_height)
 
 
-
-
 # CUSTOM OPEN3D VIEWER
 class Custom3dView:
     def __init__(self, cloud, mesh, result):
@@ -390,6 +388,7 @@ class TableModel(QAbstractTableModel):
         # The following takes the first sub-list, and returns
         # the length (only works if all rows are an equal length)
         return len(self._data[0])
+
 
 def QPixmapFromItem(item):
     """
@@ -588,6 +587,7 @@ class SimpleViewer(QGraphicsView):
 
         rect = QRectF(left, top, w, h)
         self.fitInView(rect, Qt.KeepAspectRatio)
+
 
 def createLineIterator(P1, P2, img):
     """
@@ -973,10 +973,10 @@ class PhotoViewer(QGraphicsView):
                 # compute line values
                 p1 = np.array([int(self.origin.x()), int(self.origin.y())])
                 p2 = np.array([int(self.new_coord.x()), int(self.new_coord.y())])
-                print(p1,p2)
+                print(p1, p2)
                 line_values = createLineIterator(p1, p2, self.height_values)
 
-                self.line_values_final = line_values[:,2]
+                self.line_values_final = line_values[:, 2]
 
                 # emit signal (end of measure)
                 self.endDrawing_line_meas.emit()
@@ -987,3 +987,74 @@ class PhotoViewer(QGraphicsView):
             self.toggleDragMode()
 
         super(PhotoViewer, self).mouseReleaseEvent(event)
+
+
+class StandardItem(QStandardItem):
+    def __init__(self, txt='', image_path='', font_size=10, set_bold=False, color=QColor(0, 0, 0)):
+        super().__init__()
+
+        fnt = QFont('Open Sans', font_size)
+        fnt.setBold(set_bold)
+
+        self.setEditable(False)
+        self.setForeground(color)
+        self.setFont(fnt)
+        self.setText(txt)
+
+        if image_path:
+            image = QImage(image_path)
+            self.setData(image, Qt.DecorationRole)
+
+
+class ImageLabel(QLabel):
+    def __init__(self):
+        super().__init__()
+
+        self.setAlignment(Qt.AlignCenter)
+        self.setText('\n\n Drop Image Here \n\n')
+        self.setStyleSheet('''
+            QLabel{
+                border: 2px dashed #aaa
+            }
+        ''')
+
+
+class TestListView(QListWidget):
+    dropped = Signal(list)
+
+    def __init__(self, type, parent=None):
+        super(TestListView, self).__init__(parent)
+        self.setAcceptDrops(True)
+        self.setIconSize(QSize(72, 72))
+        # self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setFixedWidth(350)
+        self.setStyleSheet('''
+                    QListWidget{
+                        border: 2px dashed #aaa
+                    }
+                ''')
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(Qt.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(Qt.CopyAction)
+            event.accept()
+            links = []
+            for url in event.mimeData().urls():
+                links.append(str(url.toLocalFile()))
+            # self.emit(QtCore.SIGNAL("dropped"), links)
+            self.dropped.emit(links)
+        else:
+            event.ignore()

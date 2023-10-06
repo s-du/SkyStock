@@ -5,6 +5,8 @@ import numpy as np
 import open3d as o3d
 import open3d.visualization.gui as gui
 import os
+from pathlib import Path
+from shutil import copyfile, copytree
 from pointify_engine import process
 import widgets as wid
 import resources as res
@@ -23,6 +25,8 @@ TODO's
     - A giant map with all footprints
 
 """
+# ODM
+
 # SAM
 USE_FASTSAM = False
 
@@ -138,6 +142,7 @@ class SkyStock(QtWidgets.QMainWindow):
         Link signals to slots
         """
         self.actionLoad.triggered.connect(self.get_pointcloud)
+        self.actionPhotogr.triggered.connect(self.odm_start)
         self.actionSelectPoint.triggered.connect(self.detect_stock)
         self.actionCrop.triggered.connect(self.go_crop)
         self.actionDetect.triggered.connect(self.go_yolo)
@@ -159,6 +164,105 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.selmod.selectionChanged.connect(self.on_tree_change)
 
+    # ODM Related_______________________________________________
+    def odm_start(self):
+        # get output directory (for all files)
+        out_dir = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select output_folder"))
+        while not os.path.isdir(out_dir):
+            QtWidgets.QMessageBox.warning(self, "Warning",
+                                          "Oops! Not a folder!")
+            out_dir = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select output_folder"))
+
+        # create specific folder for the app outputs
+        self.app_dir = os.path.join(out_dir, 'SkyStock')
+        process.new_dir(self.app_dir)
+
+        # launch odm options dialog
+        dialog = dia.Pyodm(self.app_dir, process.ODM_DEFAULT_PC_QUALITY_LIST)
+        if dialog.exec_():
+            if len(dialog.img_list) <= 1:
+                print('not enough image added')
+            else:
+                self.odm_img_list = dialog.img_list
+                try:
+                    self.odm_prepare_images()
+                    idx_1 = dialog.comboBox_features.currentIndex()
+                    idx_2 = dialog.comboBox_quality.currentIndex()
+
+                    self.odm_go(idx_1, idx_2)
+                except Exception as e:
+                    # Print the exception to the console
+                    print(f"Error: {e}")
+
+                    # Show a warning message using PySide6
+                    QtWidgets.QMessageBox.warning(None, "Warning", "Something went wrong with ODM!")
+
+    def odm_prepare_images(self):
+        # read ops details
+        images = self.odm_img_list
+        subfolder_name = 'code'
+
+        # create subfolders to store results
+        out_subdir = os.path.join(self.app_dir, subfolder_name)
+        if not os.path.exists(out_subdir):
+            os.mkdir(out_subdir)
+
+        img_dir = os.path.join(out_subdir, 'images')
+        self.results_dir = os.path.join(out_subdir, 'outputs')
+
+        if not os.path.exists(img_dir):
+            os.mkdir(img_dir)
+        if not os.path.exists(self.results_dir):
+            os.mkdir(self.results_dir)
+
+        list_copied_images = []
+        for img in images:
+            _, img_file = os.path.split(img)
+            dest_file = os.path.join(img_dir, img_file)
+            if not os.path.exists(dest_file):
+                copyfile(img, dest_file)
+                list_copied_images.append(dest_file)
+
+        self.odm_target_path = Path(self.app_dir)
+        print('image prep done')
+
+    def odm_go(self, idx_1, idx_2):
+        # TODO add check if already computed
+
+        feat_qual = process.ODM_DEFAULT_PC_QUALITY_LIST[idx_1]
+        pc_qual = process.ODM_DEFAULT_PC_QUALITY_LIST[idx_2]
+
+        # launch photogrammetric reconstruction
+        self.odm_thread = process.ODMThread(self.odm_target_path, feat_qual, pc_qual)
+        self.odm_thread.outputSignal.connect(self.odm_update_feedback)
+        self.odm_thread.finished.connect(self.odm_post_process)
+        self.odm_thread.start()
+
+    def odm_update_feedback(self, str):
+        if 'Initializing ODM 3.2.1' in str:
+            self.update_progress(nb=5, text='Launching ODM...')
+        elif 'Running opensfm stage' in str:
+            self.update_progress(nb=10, text='Launching SFM stage...')
+        elif 'detect_features' in str:
+            self.update_progress(nb=15, text='Detecting features...')
+        elif 'match_features' in str:
+            self.update_progress(nb=20, text='Matching features...')
+        elif 'create_tracks' in str:
+            self.update_progress(nb=30, text='Matching features...')
+        elif 'Running openmvs stage' in str:
+            self.update_progress(nb=40, text='Launching MVS stage...')
+        elif 'Running odm_filterpoints stage' in str:
+            self.update_progress(nb=75, text='Filtering cloud...')
+        elif 'ODM app finished' in str:
+            self.update_progress(nb=100, text='Reconstruction finished')
+
+    def odm_post_process(self):
+        print('ok success!')
+        path = os.path.join(self.app_dir, 'code', 'odm_filterpoints', 'point_cloud.ply')
+        self.create_point_cloud_object(path, 'Original_point_cloud')
+
+        self.update_progress(text='Choose a functionality!')
+
     def show_info(self):
         dialog = dia.AboutDialog()
         if dialog.exec_():
@@ -166,11 +270,9 @@ class SkyStock(QtWidgets.QMainWindow):
 
     def line_meas(self):
         if self.actionLineMeas.isChecked():
-
             # activate drawing tool
             self.viewer.line_meas = True
             self.viewer.toggleDragMode()
-
 
     def change_altitude_limits(self):
         dialog = dia.MySliderDemo(self.current_cloud.height_data)
@@ -181,8 +283,8 @@ class SkyStock(QtWidgets.QMainWindow):
 
     def get_ground_profile(self):
         values = self.viewer.line_values_final
-        x = np.linspace(0, len(values)*self.current_cloud.res/1000, num=len(values))
-        plt.plot(x,values, color=(1,0,1))
+        x = np.linspace(0, len(values) * self.current_cloud.res / 1000, num=len(values))
+        plt.plot(x, values, color=(1, 0, 1))
         plt.axis('equal')
         plt.ylabel('Height [m]')
         plt.xlabel('Distance [m]')
@@ -195,7 +297,7 @@ class SkyStock(QtWidgets.QMainWindow):
         Analyze the current top view of the site, and detect stock piles using YOLO algorithm
         :return:
         """
-        img = self.current_cloud.view_paths[0] # the first element is the top view
+        img = self.current_cloud.view_paths[0]  # the first element is the top view
         results = model(img)[0]
         count = 1
 
@@ -216,7 +318,7 @@ class SkyStock(QtWidgets.QMainWindow):
                 self.stocks_inventory.append(stock_obj)
 
                 # update counter
-                count +=1
+                count += 1
 
         # add current inventory to viewer
         self.viewer.add_list_boxes(self.stocks_inventory)
@@ -226,7 +328,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # enable super sam
         self.actionSuperSam.setEnabled(True)
-        self.actionDetect.setEnabled(False) # TODO: allow the user to re-run YOLO
+        self.actionDetect.setEnabled(False)  # TODO: allow the user to re-run YOLO
 
     def sam_chain(self):
         """
@@ -236,64 +338,67 @@ class SkyStock(QtWidgets.QMainWindow):
         print(r"lets get serious!")
         to_pop = []
 
-        # take each positive yolo result, for each stock pile object, and perform a SAM segmentation in its middle
+        # take each positive yolo result, for each stockpile object, and perform a SAM segmentation in its middle
         for i, el in enumerate(self.stocks_inventory):
-            x1, y1, x2, y2, score, class_id = el.yolo_bbox
-            # take center of the box
-            x = (x1+x2)/2
-            y = (y1+y2)/2
+            if el.to_check:
+                x1, y1, x2, y2, score, class_id = el.yolo_bbox
+                # take center of the box
+                x = (x1 + x2) / 2
+                y = (y1 + y2) / 2
 
-            seg_dir = os.path.join(self.current_cloud.img_dir, 'segmentation') # create a folder to store temporary images
-            process.new_dir(seg_dir)
-            list_img = []
+                seg_dir = os.path.join(self.current_cloud.img_dir,
+                                       'segmentation')  # create a folder to store temporary images
+                process.new_dir(seg_dir)
+                list_img = []
 
-            if not USE_FASTSAM:
-                test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+                if not USE_FASTSAM:
+                    test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
 
-            for file in os.listdir(seg_dir):
-                fileloc = os.path.join(seg_dir, file)
-                list_img.append(fileloc)
+                for file in os.listdir(seg_dir):
+                    fileloc = os.path.join(seg_dir, file)
+                    list_img.append(fileloc)
 
-            dialog = dia.SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
-            dialog.setWindowTitle(f"Select best output, {el.name}")
+                dialog = dia.SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
+                dialog.setWindowTitle(f"Select best output, {el.name}")
 
-            if dialog.exec_():
-                # the name is required
-                text, ok = QtWidgets.QInputDialog.getText(self, 'input dialog', 'Name of the part')
-                if ok:
-                    el.name = text
+                if dialog.exec_():
+                    # the name is required
+                    text, ok = QtWidgets.QInputDialog.getText(self, 'input dialog', 'Name of the part')
+                    if ok:
+                        el.name = text
 
-                # the inventory element is validated and the mask is added
-                print('good choice!')
-                choice_im = dialog.current_img
-                mask_path = list_img[choice_im]
+                    # the inventory element is validated and the mask is added
+                    print('good choice!')
+                    choice_im = dialog.current_img
+                    mask_path = list_img[choice_im]
 
-                contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
-                process.new_dir(contour_dir)
-                dest_path1 = os.path.join(contour_dir, 'contour.jpg')
-                dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
-                dest_path3 = os.path.join(contour_dir, 'contour_rgb.jpg')
-                dest_path4 = os.path.join(contour_dir, 'crop_contour_rgb.jpg')
+                    contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
+                    process.new_dir(contour_dir)
+                    dest_path1 = os.path.join(contour_dir, 'contour.jpg')
+                    dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
+                    dest_path3 = os.path.join(contour_dir, 'contour_rgb.jpg')
+                    dest_path4 = os.path.join(contour_dir, 'crop_contour_rgb.jpg')
 
-                # convert SAM mask to polygon
-                top_view = cv2.imread(self.current_cloud.view_paths[0])
-                coords, area, _ = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2, dest_path3, dest_path4)
+                    # convert SAM mask to polygon
+                    top_view = cv2.imread(self.current_cloud.view_paths[0])
+                    coords, area, _ = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2,
+                                                                   dest_path3, dest_path4)
 
-                # add infos to stock pile
-                im = cv2.imread(dest_path1)
-                im2 = cv2.imread(dest_path2)
-                im3 = cv2.imread(dest_path3)
-                im4 = cv2.imread(dest_path4)
-                el.mask = im
-                el.mask_cropped = im2
-                el.mask_rgb = im3
-                el.mask_rgb_cropped = im4
+                    # add infos to stock pile
+                    im = cv2.imread(dest_path1)
+                    im2 = cv2.imread(dest_path2)
+                    im3 = cv2.imread(dest_path3)
+                    im4 = cv2.imread(dest_path4)
+                    el.mask = im
+                    el.mask_cropped = im2
+                    el.mask_rgb = im3
+                    el.mask_rgb_cropped = im4
 
-                el.coords = coords
-                el.area = area*(self.current_cloud.res/1000)**2
+                    el.coords = coords
+                    el.area = area * (self.current_cloud.res / 1000) ** 2
 
-            else:
-                to_pop.append(i)
+                else:
+                    to_pop.append(i)
 
         # redraw stocks
         process.delete_elements_by_indexes(self.stocks_inventory, to_pop)
@@ -308,8 +413,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
             # compute volume of stock pile
             stock_pile.volume = process.compute_volume(self.current_cloud.height_data, self.current_cloud.ground_data,
-                                                       mask, self.current_cloud.res/1000)
-
+                                                       mask, self.current_cloud.res / 1000)
 
         # add data to viewer
         self.viewer.clean_scene()
@@ -368,8 +472,9 @@ class SkyStock(QtWidgets.QMainWindow):
 
             # convert SAM mask to polygon
             top_view = cv2.imread(self.current_cloud.view_paths[0])
-            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2, dest_path3,
-                                                           dest_path4)
+            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2,
+                                                                        dest_path3,
+                                                                        dest_path4)
 
             # add infos to stock pile
             im = cv2.imread(dest_path1)
@@ -380,6 +485,7 @@ class SkyStock(QtWidgets.QMainWindow):
             # add object
             stock_obj = process.StockPileObject()
             stock_obj.name = name
+            stock_obj.to_check = False
             stock_obj.yolo_bbox = yolo_type_bbox
 
             stock_obj.mask = im
@@ -388,6 +494,13 @@ class SkyStock(QtWidgets.QMainWindow):
             stock_obj.mask_rgb_cropped = im4
             stock_obj.coords = coords
             stock_obj.area = area * (self.current_cloud.res / 1000) ** 2
+
+            # compute volume
+            process.create_ground_map(self.current_cloud.ground_data, stock_obj.mask)
+
+            # compute volume of stock pile
+            stock_obj.volume = process.compute_volume(self.current_cloud.height_data, self.current_cloud.ground_data,
+                                                      stock_obj.mask, self.current_cloud.res / 1000)
 
             self.stocks_inventory.append(stock_obj)
 
@@ -400,10 +513,13 @@ class SkyStock(QtWidgets.QMainWindow):
         self.viewer.add_list_poly(self.stocks_inventory)
 
         # enabled viewers buttons
+        self.pushButton_show_poly.setEnabled(True)
+        self.pushButton_show_bbox.setEnabled(True)
+        self.pushButton_show_infos.setEnabled(True)
+
         self.pushButton_show_poly.setChecked(True)
         self.pushButton_show_bbox.setChecked(True)
         self.pushButton_show_infos.setChecked(True)
-
 
     def toggle_infos(self):
         if not self.pushButton_show_infos.isChecked():
@@ -528,7 +644,6 @@ class SkyStock(QtWidgets.QMainWindow):
                 # process.basic_vis_creation(segm_load, 'top')
 
         self.hand_pan()
-
 
     def inventory_canva(self):
         image_list = []
