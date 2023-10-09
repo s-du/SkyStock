@@ -1,33 +1,26 @@
 import cv2
 import earthpy.spatial as es
-import earthpy.plot as ep
 import math
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import copy
-
 import dialogs as dia
-
 import numpy as np
 import open3d as o3d
 import os
-import pandas as pd
 import rasterio as rio
 import shapely as sh
 import shutil
 import statistics
 import subprocess
-
 from shapely.geometry import Polygon
 from PIL import Image, ImageOps
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Signal, QRunnable, QObject, QProcess, QThread
-
 from scipy.signal import find_peaks
 from scipy.interpolate import griddata
-
 from blend_modes import multiply, hard_light
 import resources as res
+from pointify_engine import simplepcv as spcv
 
 # PARAMETERS
 CC_PATH = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
@@ -361,7 +354,8 @@ class NokPointCloud:
         if self.res == 0:
             self.res = round(self.density * 4, 3) * 1000
         print(f'the image resolution is {self.res}')
-        raster_top_rgb_height_pcv(self.path, self.res / 1000)
+        # raster_top_rgb_height_pcv(self.path, self.res / 1000)
+        raster_top_rgb_height(self.path, self.res / 1000)
 
         # create new path for dtm
         path_top = os.path.join(self.img_dir, 'top.tif')
@@ -378,9 +372,8 @@ class NokPointCloud:
         # relocate image file
         img_list = generate_list('.tif', self.location_dir)
         print(f'image list {img_list}')
-        os.rename(img_list[0], path_pcv)
-        os.rename(img_list[1], path_top)
-        os.rename(img_list[2], path_dtm)
+        os.rename(img_list[0], path_top)
+        os.rename(img_list[1], path_dtm)
 
         # store height data
         with rio.open(path_dtm) as src:
@@ -397,8 +390,8 @@ class NokPointCloud:
                 self.low_point = dialog.slider_low.value()
                 self.high_point = dialog.slider_high.value()
 
-
         # process files
+        create_elevation(path_dtm, path_pcv, type='pcv')
         create_elevation(path_dtm, path_top_elevation, type='standard')
         create_elevation(path_dtm, path_top_hillshade, type='hill')
 
@@ -1128,6 +1121,20 @@ def raster_top_rgb_height_pcv(cloud_path, grid_step):
     fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
     cc_function(cloud_dir, function_name, fun_txt)
 
+def raster_top_rgb_height(cloud_path, grid_step):
+    (cloud_dir, cloudname) = os.path.split(cloud_path)
+    cc_cloud = '"' + cloud_path + '"'
+    proj = ' -SF_PROJ MAX -PROJ MAX'
+
+    function_name = 'raster'
+
+    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_RGB -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z'
+
+    # Prepare CloudCompare function
+    fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
+    cc_function(cloud_dir, function_name, fun_txt)
 
 def render_plane_in_cloud(plane_cloud_path, cloud_path, grid_step):
     # File names and paths
@@ -2055,17 +2062,19 @@ def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='stand
     if low_limit != 0:
         elevation[elevation >= high_limit] = high_limit
 
-    # Define a colormap (you can choose or create your own)
-    cmap = plt.get_cmap("terrain")
-
-    hillshade = es.hillshade(elevation,  altitude=0)
-    print(np.amin(elevation))
 
     # Plot the altitude data with the colormap
     if type =='standard':
+        cmap = plt.get_cmap("terrain")
         plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
     elif type == 'hill':
+        hillshade = es.hillshade(elevation, altitude=0)
         plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys', vmin=np.nanmin(hillshade), vmax=np.nanmax(hillshade))
+    elif type == 'pcv':
+        visibility = spcv.compute_sky_visibility(elevation)
+        result = spcv.export_results(visibility, -1,1, 2,0.2,standardize=True)
+        cv2.imwrite(dest_path,result)
+
 
     # Close the figure
     plt.close()
