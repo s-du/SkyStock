@@ -2,6 +2,7 @@ import cv2
 import earthpy.spatial as es
 import math
 import matplotlib.pyplot as plt
+import matplotlib.path as mpath
 import copy
 import dialogs as dia
 import numpy as np
@@ -288,11 +289,10 @@ class NokPointCloud:
         self.location_dir, self.file = os.path.split(self.path)
 
     def do_preprocess(self):
-        self.pc_load = o3d.io.read_point_cloud(self.path)
 
         self.bound_pc_path = os.path.join(self.processed_data_dir, "pc_limits.ply")
-        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points = compute_basic_properties(
-            self.pc_load,
+        self.bound, self.bound_points, self.center, self.dim, self.density, self.n_points, self.pc_load = compute_basic_properties(
+            self.path,
             save_bound_pc=True,
             output_path_bound_pc=self.bound_pc_path)
 
@@ -402,7 +402,7 @@ class NokPointCloud:
         pass
 
     def standard_images(self):
-        self.res = round(self.density * 5, 3) * 1000
+        self.res = round(self.density, 3) * 1000
         print(f'the image resolution is {self.res}')
         raster_all_bound(self.path, self.res / 1000, self.bound_pc_path, xray=False)
 
@@ -565,8 +565,8 @@ class NokPointCloud:
 
         self.path = new_path
         self.update_dirs()
-        self.pc_load = o3d.io.read_point_cloud(self.path)
-        self.bound, self.bound_points, self.center, self.dim, _, _ = compute_basic_properties(self.pc_load,
+
+        self.bound, self.bound_points, self.center, self.dim, _, _, self.pc_load = compute_basic_properties(self.path,
                                                                                                       save_bound_pc=True,
                                                                                                       output_path_bound_pc=self.bound_pc_path)
         if self.sub_sampled:
@@ -593,7 +593,7 @@ class NokPointCloud:
             shutil.copyfile(self.path, self.sub_pc_path)
 
         if self.sub_sampled:
-            _, _, _, _, _, self.n_points_sub = compute_basic_properties(sub)
+            _, _, _, _, _, self.n_points_sub, _ = compute_basic_properties(self.sub_pc_path)
             print(f'The subsampled point cloud has {self.n_points_sub} points')
 
         # fixing RANSAC Parameters
@@ -726,7 +726,7 @@ def create_box_limit(pcd, output_path):
     o3d.io.write_point_cloud(output_path, pcd)
 
 
-def compute_basic_properties(pc_load, save_bound_pc=False, output_path_bound_pc='', compute_full_density=False):
+def compute_basic_properties(path, save_bound_pc=False, output_path_bound_pc='', compute_full_density=False):
     """
     A function that compiles all the basic properties of the point cloud
     :param pc_load: (open3D pc) the point cloud object, loaded into open3D
@@ -736,9 +736,25 @@ def compute_basic_properties(pc_load, save_bound_pc=False, output_path_bound_pc=
     :return:bound = the bounding box, center= the center of the bounding box, dim= the extend of the bounding box, n_points= the number of points
     """
     # bounding box
+    pc_load = o3d.io.read_point_cloud(path)
     bound = pc_load.get_axis_aligned_bounding_box()
     center = bound.get_center()
     dim = bound.get_extent()
+
+    # test for negative values
+    lowest_point = center[2] - dim[2] / 2
+
+    if lowest_point < 0:
+        # shift the point cloud up
+        pc_load = pc_load.translate((0,0,-lowest_point))
+        bound = pc_load.get_axis_aligned_bounding_box()
+        center = bound.get_center()
+        dim = bound.get_extent()
+
+        # save shifted point cloud
+        o3d.io.write_point_cloud(path, pc_load)
+
+
     points_bb = bound.get_box_points()
     points_bb_np = np.asarray(points_bb)
     # create point cloud from bounding box
@@ -780,7 +796,7 @@ def compute_basic_properties(pc_load, save_bound_pc=False, output_path_bound_pc=
         dist = pc_load.compute_nearest_neighbor_distance()
         density = statistics.mean(dist)
 
-    return bound, points_bb_np, center, dim, density, n_points
+    return bound, points_bb_np, center, dim, density, n_points, pc_load
 
 
 def compute_density(pc_load, center, dim_z):
@@ -1129,8 +1145,8 @@ def raster_top_rgb_height(cloud_path, grid_step):
     function_name = 'raster'
 
     function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
-               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_RGB -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
-               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z'
+               + str(grid_step) + ' -OUTPUT_RASTER_RGB -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -OUTPUT_RASTER_Z'
 
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
@@ -1838,6 +1854,44 @@ def mask_image_with_shape(original_img, mask_img):
     return result_image
 
 
+def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
+    """
+
+    :param elevation: a numpy array with elevation values (shape (X,Y))
+    :param rgb_path: a path to a RGB image (shape of the resulting array (X,Y,3)
+    :param coords: a list of coordinates creating a closed polygons
+    :param res: resolution in m/pixel
+    :return:
+    """
+    # 0. Read RGB Data
+    image = Image.open(rgb_path)
+    # convert image to numpy array
+    rgb = np.asarray(image)
+
+    # 1. Create a path object from the polygon coordinates
+    path = mpath.Path(coords)
+
+    # 2. Create a boolean mask for the points inside the polygon
+    y, x = np.mgrid[:elevation.shape[0], :elevation.shape[1]]
+    coords = np.column_stack((x.ravel(), y.ravel()))
+    mask = path.contains_points(coords).reshape(elevation.shape)
+
+    # 3. Extract the height/rgb values from the numpy array using the mask
+    heights_inside_polygon = elevation[mask]
+    rgb_inside_polygon = rgb[mask]
+
+    # 4. Create the XYZ point cloud
+    x_coords, y_coords = np.where(mask)
+
+    # Convert pixel coordinates to meters
+    x_coords_meters = x_coords * res
+    y_coords_meters = y_coords * res
+
+    xyz_points = np.column_stack((x_coords_meters, y_coords_meters, heights_inside_polygon))
+    color_array = rgb_inside_polygon
+
+    return xyz_points, color_array
+
 def convert_mask_polygon(image_path, original_rgb, dest_poly_path, dest_crop_poly_path, dest_poly_rgb_path, dest_poly_rgb_crop_path):
     mask_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     img_binary = cv2.threshold(mask_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
@@ -2072,7 +2126,7 @@ def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='stand
         plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys', vmin=np.nanmin(hillshade), vmax=np.nanmax(hillshade))
     elif type == 'pcv':
         visibility = spcv.compute_sky_visibility(elevation)
-        result = spcv.export_results(visibility, -1,1, 2,0.2,standardize=True)
+        result = spcv.export_results(visibility, -1,1, 2,0.2,standardize=False)
         cv2.imwrite(dest_path,result)
 
 

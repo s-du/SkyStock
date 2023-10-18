@@ -16,6 +16,7 @@ import dialogs as dia
 
 """
 TODO's
+- Solve 'chromatic aberration problem' --> Comes when a Odm cloud is saved in open3D
 - Change data viz in center of piles
 - Create stockpiles objects and show them in the treeview
 - Implement progress bar
@@ -93,6 +94,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
         self.add_icon(res.find('img/profile.png'), self.actionLineMeas)
         self.add_icon(res.find('img/alti.png'), self.actionCropHeight)
+        self.add_icon(res.find('img/poly.png'), self.actionPolySeg)
 
         self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
         self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
@@ -129,7 +131,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
         self.treeView.setModel(self.model)
 
-        # reset list of stock piles
+        # reset list of stockpiles
 
     def add_icon(self, img_source, pushButton_object):
         """
@@ -151,6 +153,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionShowInventory.triggered.connect(self.inventory_canva)
         self.actionLineMeas.triggered.connect(self.line_meas)
         self.actionCropHeight.triggered.connect(self.change_altitude_limits)
+        self.actionPolySeg.triggered.connect(self.add_poly_seg)
 
         # toggle buttons
         self.pushButton_show_poly.clicked.connect(self.toggle_poly)
@@ -279,6 +282,7 @@ class SkyStock(QtWidgets.QMainWindow):
         dialog = dia.MySliderDemo(self.current_cloud.height_data)
 
         if dialog.exec_():
+            # change the low and high point in the point cloud object --> It should have impact on the cropping
             self.current_cloud.low_point = dialog.slider_low.value()
             self.current_cloud.high_point = dialog.slider_high.value()
 
@@ -293,9 +297,17 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.hand_pan()
 
+    def add_poly_seg(self):
+        """
+        Allows the user to click on consecutive points to draw a polygon. When pressing 'enter' the polygon is closed
+        :return:
+        """
+        # activate the tool on the viewer
+
+    # AI TOOLS ----------------------------------------------------------
     def go_yolo(self):
         """
-        Analyze the current top view of the site, and detect stock piles using YOLO algorithm
+        Analyze the current top view of the site, and detect stockpiles bboxes using YOLO algorithm
         :return:
         """
         img = self.current_cloud.view_paths[0]  # the first element is the top view
@@ -330,6 +342,115 @@ class SkyStock(QtWidgets.QMainWindow):
         # enable super sam
         self.actionSuperSam.setEnabled(True)
         self.actionDetect.setEnabled(False)  # TODO: allow the user to re-run YOLO
+
+    def sam_process(self, seg_dir, x, y, stock_object=None):
+        list_img = []
+        if not USE_FASTSAM:
+            test2.do_sam(self.current_cloud.view_paths[0], seg_dir, x, y)
+
+        for file in os.listdir(seg_dir):
+            fileloc = os.path.join(seg_dir, file)
+            list_img.append(fileloc)
+
+            # open the dialog for selecting the best segmentation (based on three top scores from SAM)
+            dialog = dia.SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
+            dialog.setWindowTitle("Select best output")
+
+            if dialog.exec_():
+                text, ok = QtWidgets.QInputDialog.getText(self, 'input dialog', 'Name of the part')
+                if ok:
+                    name = text
+                else:
+                    name = f'Stock pile {len(self.stocks_inventory)}'
+
+                print('good choice!')
+                choice_im = dialog.current_img
+                mask_path = list_img[choice_im]
+
+                contour_dir = os.path.join(self.current_cloud.img_dir, 'contour')
+                process.new_dir(contour_dir)
+                dest_path1 = os.path.join(contour_dir, 'contour.jpg')
+                dest_path2 = os.path.join(contour_dir, 'crop_contour.jpg')
+                dest_path3 = os.path.join(contour_dir, 'contour_rgb.jpg')
+                dest_path4 = os.path.join(contour_dir, 'crop_contour_rgb.jpg')
+
+                # convert SAM mask to polygon
+                top_view = cv2.imread(self.current_cloud.view_paths[0])
+                elevation = self.current_cloud.height_data
+
+                coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view,
+                                                                            dest_path1,
+                                                                            dest_path2,
+                                                                            dest_path3,
+                                                                            dest_path4)
+
+                # add infos to stock pile
+                im = cv2.imread(dest_path1)
+                im2 = cv2.imread(dest_path2)
+                im3 = cv2.imread(dest_path3)
+                im4 = cv2.imread(dest_path4)
+
+                # add stockpile class object
+
+                stock_obj = process.StockPileObject()
+                stock_obj.name = name
+                stock_obj.to_check = False
+                stock_obj.yolo_bbox = yolo_type_bbox
+
+                stock_obj.mask = im
+                stock_obj.mask_cropped = im2
+                stock_obj.mask_rgb = im3
+                stock_obj.mask_rgb_cropped = im4
+                stock_obj.coords = coords
+                stock_obj.area = area * (self.current_cloud.res / 1000) ** 2
+
+                # compute volume
+                process.create_ground_map(self.current_cloud.ground_data, stock_obj.mask)
+
+                # compute volume of stock pile
+                stock_obj.volume = process.compute_volume(self.current_cloud.height_data,
+                                                          self.current_cloud.ground_data,
+                                                          stock_obj.mask, self.current_cloud.res / 1000)
+
+                self.stocks_inventory.append(stock_obj)
+
+                # draw all elements on 2D view
+                self.viewer.clean_scene()
+
+                self.viewer.add_list_infos(self.stocks_inventory)
+                self.viewer.add_list_boxes(self.stocks_inventory)
+                self.viewer.add_list_poly(self.stocks_inventory)
+
+                # create new point cloud object
+                stock_pc, color_array = process.create_pc_from_elevation_coords(elevation,
+                                                                                self.current_cloud.view_paths[0],
+                                                                                coords,
+                                                                                self.current_cloud.res / 1000)
+                pcd = o3d.geometry.PointCloud()
+                color_array_normalized = color_array / 255.0
+                pcd.points = o3d.utility.Vector3dVector(stock_pc)
+                pcd.colors = o3d.utility.Vector3dVector(color_array_normalized)
+
+                sam_cloud_path = os.path.join(self.current_cloud.processed_data_dir,
+                                              name + '.ply')  # TODO Ensure unique names
+                o3d.io.write_point_cloud(sam_cloud_path, pcd)
+
+                self.create_point_cloud_object(sam_cloud_path, name, selection=False, gsd=False, orient=False,
+                                               ransac=False, mesh=False)
+                self.current_cloud = self.Nokclouds[-1]
+
+                # o3d.visualization.draw_geometries([pcd])
+
+                """
+                # launch custom viewer
+                app_vis = gui.Application.instance
+                app_vis.initialize()
+                print(self.current_cloud.pc_load)
+                print(self.current_cloud.mesh_load)
+
+                viz = wid.Custom3dView(self.current_cloud.pc_load, self.current_cloud.mesh_load, str(stock_obj.volume))
+                app_vis.run()
+                """
 
     def sam_chain(self):
         """
@@ -433,6 +554,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
     def add_single_sam(self):
         # switch back to hand tool
+        # TODO Add a visual feedback for the point
         self.update_progress(text='Computing...')
 
         interest_point = self.viewer.get_selected_point()
@@ -450,6 +572,7 @@ class SkyStock(QtWidgets.QMainWindow):
             fileloc = os.path.join(seg_dir, file)
             list_img.append(fileloc)
 
+        # open the dialog for selecting the best segmentation (based on three top scores from SAM)
         dialog = dia.SelectSegmentResult(list_img, self.current_cloud.view_paths[0])
         dialog.setWindowTitle("Select best output")
 
@@ -473,7 +596,11 @@ class SkyStock(QtWidgets.QMainWindow):
 
             # convert SAM mask to polygon
             top_view = cv2.imread(self.current_cloud.view_paths[0])
-            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view, dest_path1, dest_path2,
+            elevation = self.current_cloud.height_data
+
+            coords, area, yolo_type_bbox = process.convert_mask_polygon(mask_path, top_view,
+                                                                        dest_path1,
+                                                                        dest_path2,
                                                                         dest_path3,
                                                                         dest_path4)
 
@@ -483,7 +610,7 @@ class SkyStock(QtWidgets.QMainWindow):
             im3 = cv2.imread(dest_path3)
             im4 = cv2.imread(dest_path4)
 
-            # add object
+            # add stockpile class object
             stock_obj = process.StockPileObject()
             stock_obj.name = name
             stock_obj.to_check = False
@@ -505,14 +632,45 @@ class SkyStock(QtWidgets.QMainWindow):
 
             self.stocks_inventory.append(stock_obj)
 
+            # draw all elements on 2D view
+            self.viewer.clean_scene()
+
+            self.viewer.add_list_infos(self.stocks_inventory)
+            self.viewer.add_list_boxes(self.stocks_inventory)
+            self.viewer.add_list_poly(self.stocks_inventory)
+
+            # create new point cloud object
+            stock_pc, color_array = process.create_pc_from_elevation_coords(elevation,
+                                                                            self.current_cloud.view_paths[0],
+                                                                            coords,
+                                                                            self.current_cloud.res / 1000)
+            pcd = o3d.geometry.PointCloud()
+            color_array_normalized = color_array / 255.0
+            pcd.points = o3d.utility.Vector3dVector(stock_pc)
+            pcd.colors = o3d.utility.Vector3dVector(color_array_normalized)
+
+            sam_cloud_path = os.path.join(self.current_cloud.processed_data_dir,
+                                          name + '.ply')  # TODO Ensure unique names
+            o3d.io.write_point_cloud(sam_cloud_path, pcd)
+
+            self.create_point_cloud_object(sam_cloud_path, name, selection=False, gsd=False, orient=False, ransac=False,
+                                           mesh=False)
+            self.current_cloud = self.Nokclouds[-1]
+
+            # o3d.visualization.draw_geometries([pcd])
+
+            """
+            # launch custom viewer
+            app_vis = gui.Application.instance
+            app_vis.initialize()
+            print(self.current_cloud.pc_load)
+            print(self.current_cloud.mesh_load)
+
+            viz = wid.Custom3dView(self.current_cloud.pc_load, self.current_cloud.mesh_load, str(stock_obj.volume))
+            app_vis.run()
+            """
+
         self.hand_pan()
-
-        self.viewer.clean_scene()
-
-        self.viewer.add_list_infos(self.stocks_inventory)
-        self.viewer.add_list_boxes(self.stocks_inventory)
-        self.viewer.add_list_poly(self.stocks_inventory)
-
         # enabled viewers buttons
         self.pushButton_show_poly.setEnabled(True)
         self.pushButton_show_bbox.setEnabled(True)
@@ -521,24 +679,6 @@ class SkyStock(QtWidgets.QMainWindow):
         self.pushButton_show_poly.setChecked(True)
         self.pushButton_show_bbox.setChecked(True)
         self.pushButton_show_infos.setChecked(True)
-
-    def toggle_infos(self):
-        if not self.pushButton_show_infos.isChecked():
-            self.viewer.clean_scene_text()
-        else:
-            self.viewer.add_list_infos(self.stocks_inventory)
-
-    def toggle_bboxes(self):
-        if not self.pushButton_show_bbox.isChecked():
-            self.viewer.clean_scene_rectangle()
-        else:
-            self.viewer.add_list_boxes(self.stocks_inventory)
-
-    def toggle_poly(self):
-        if not self.pushButton_show_poly.isChecked():
-            self.viewer.clean_scene_poly()
-        else:
-            self.viewer.add_list_poly(self.stocks_inventory)
 
     def detect_stock(self, stuff_class):
         # Here the SAM model is called
@@ -646,6 +786,26 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.hand_pan()
 
+    # VIEWER RELATED TOOLS ----------------------------------------------------------
+
+    def toggle_infos(self):
+        if not self.pushButton_show_infos.isChecked():
+            self.viewer.clean_scene_text()
+        else:
+            self.viewer.add_list_infos(self.stocks_inventory)
+
+    def toggle_bboxes(self):
+        if not self.pushButton_show_bbox.isChecked():
+            self.viewer.clean_scene_rectangle()
+        else:
+            self.viewer.add_list_boxes(self.stocks_inventory)
+
+    def toggle_poly(self):
+        if not self.pushButton_show_poly.isChecked():
+            self.viewer.clean_scene_poly()
+        else:
+            self.viewer.add_list_poly(self.stocks_inventory)
+
     def inventory_canva(self):
         image_list = []
         name_list = []
@@ -680,7 +840,6 @@ class SkyStock(QtWidgets.QMainWindow):
         bound = self.current_cloud.pc_load.get_axis_aligned_bounding_box()
         center = bound.get_center()
         dim = bound.get_extent()
-
 
         pt1 = [center[0] - dim[0] / 2 + start_x, center[1] + dim[1] / 2 - start_y, center[2] - dim[2] / 2]
         pt2 = [pt1[0] + (end_x - start_x), pt1[1] - (end_y - start_y), center[2] + dim[2] / 2]
@@ -759,7 +918,8 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.update_progress(text='Choose a functionality!')
 
-    def create_point_cloud_object(self, path, name, orient=False, ransac=False, mesh=False, keep_previous=True):
+    def create_point_cloud_object(self, path, name, selection=True, gsd=True, orient=False, ransac=False, mesh=False,
+                                  keep_previous=True):
         cloud = process.NokPointCloud()
         if not keep_previous:
             self.Nokclouds = []
@@ -779,7 +939,8 @@ class SkyStock(QtWidgets.QMainWindow):
         process.new_dir(self.Nokclouds[-1].img_dir)
 
         # generate all basic data
-        self.process_pointcloud(self.Nokclouds[-1], orient=orient, ransac=ransac, mesh=mesh)
+        self.process_pointcloud(self.Nokclouds[-1], selection=selection, gsd=gsd, orient=orient, ransac=ransac,
+                                mesh=mesh)
 
         # add element to treeview
         self.current_cloud = self.Nokclouds[-1]
@@ -817,21 +978,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionHand_selector.setEnabled(True)
         self.actionLineMeas.setEnabled(True)
 
-    def on_tree_change(self):
-        print('CHANGED!')
-        indexes = self.treeView.selectedIndexes()
-        sel_item = self.model.itemFromIndex(indexes[0])
-        print(indexes[0])
-
-        for cloud in self.Nokclouds:
-            if cloud.name == sel_item.text():
-                self.current_cloud = cloud
-                print('Current cloud name: ', self.current_cloud.name)
-
-                self.comboBox.clear()
-                self.comboBox.addItems(self.current_cloud.view_names)
-
-    def process_pointcloud(self, pc, orient=False, ransac=False, mesh=False):
+    def process_pointcloud(self, pc, gsd=True, selection=True, orient=False, ransac=False, mesh=False):
         # 1. BASIC DATA ____________________________________________________________________________________________________
         # read full high definition point cloud (using open3d)
         print('Reading the point cloud!')
@@ -845,13 +992,13 @@ class SkyStock(QtWidgets.QMainWindow):
         list_img = [img_1, img_2, img_3, img_4]
 
         density = pc.density
+        if gsd:
+            dialog = dia.SelectGsd(list_img, density)
+            dialog.setWindowTitle("Select best output")
 
-        dialog = dia.SelectGsd(list_img, density)
-        dialog.setWindowTitle("Select best output")
-
-        if dialog.exec_():
-            print('gsd chosen!')
-            pc.res = dialog.value
+            if dialog.exec_():
+                print('gsd chosen!')
+                pc.res = dialog.value
 
         # 2. RANSAC DETECTION __________________________________________________________________________________
         if ransac:
@@ -869,7 +1016,28 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # 4. GENERATE BASIC VIEWS_______________________________________________________
         print('Launching RGB render/exterior views creation...')
-        pc.image_selection()
+        if selection:
+            pc.image_selection()
+        else:
+            pc.standard_images()
+
+    def on_tree_change(self):
+        print('CHANGED!')
+        indexes = self.treeView.selectedIndexes()
+
+        if indexes:  # Check if the list is not empty
+            sel_item = self.model.itemFromIndex(indexes[0])
+            print(indexes[0])
+
+            for cloud in self.Nokclouds:
+                if cloud.name == sel_item.text():
+                    self.current_cloud = cloud
+                    print('Current cloud name: ', self.current_cloud.name)
+
+                    self.comboBox.clear()
+                    self.comboBox.addItems(self.current_cloud.view_names)
+        else:
+            print("No items selected.")
 
     def on_img_combo_change(self):
         self.actionCrop.setEnabled(True)

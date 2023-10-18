@@ -376,6 +376,7 @@ border-radius: 10px;
    <addaction name="actionSelectPoint"/>
    <addaction name="actionDetect"/>
    <addaction name="actionSuperSam"/>
+   <addaction name="actionPolySeg"/>
    <addaction name="separator"/>
    <addaction name="actionShowInventory"/>
   </widget>
@@ -491,6 +492,11 @@ border-radius: 10px;
    </property>
    <property name="toolTip">
     <string>Create point cloud from images</string>
+   </property>
+  </action>
+  <action name="actionPolySeg">
+   <property name="text">
+    <string>PolySeg</string>
    </property>
   </action>
  </widget>

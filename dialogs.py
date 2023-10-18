@@ -138,6 +138,7 @@ class MySliderDemo(QtWidgets.QDialog):
 
         self.data = data
         min_data, max_data = np.nanmin(data), np.nanmax(data)
+        print(min_data, max_data)
 
         # Calculate the single step value as 1/20 of the range
         single_step_value = ((max_data - min_data) / 20)*10

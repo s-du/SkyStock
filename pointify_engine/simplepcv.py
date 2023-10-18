@@ -24,7 +24,7 @@ def get_sky_portion_for_direction(image, start_x, start_y, dx, dy, width, height
     max_tangent = -np.inf
     distance = 0
     x, y = start_x, start_y
-    step_size = 1.0  # or another value that makes sense for your data
+    step_size = 3 # or another value that makes sense for your data
     while 0 <= x < width and 0 <= y < height:
         if distance > 0:
             tangent = get_tangent_angle(image[int(y), int(x)] - image[int(start_y), int(start_x)], distance)
@@ -48,7 +48,7 @@ def compute_sky_visibility_for_chunk(image, start_row, end_row, num_directions=4
     return sky_visibility
 
 
-def compute_sky_visibility(image, num_directions=40, n_jobs=-1):
+def compute_sky_visibility(image, num_directions=60, n_jobs=-1):
     height, width = image.shape
 
     # If n_jobs is set to -1, use all available cores
@@ -66,14 +66,40 @@ def compute_sky_visibility(image, num_directions=40, n_jobs=-1):
     return np.vstack(results)
 
 
-def export_results(visibility, vmin, vmax, color_choice, color_factor, standardize=False):
-    if standardize:
-        vmin = np.percentile(visibility, 1)  # 1st percentile
-        vmax = np.percentile(visibility, 99)
+def compute_optimal_vmin_vmax(visibility, bins=256, threshold_low=0.05, threshold_high=0.001):
+    hist, bin_edges = np.histogram(visibility, bins=bins)
 
-    # Normalize data
-    normalized_data = (visibility - vmin) / (vmax - vmin)
+    # Normalize histogram
+    hist = hist / hist.sum()
 
+    # Find the main peak: bin with the maximum count
+    main_peak_index = np.argmax(hist)
+    print(main_peak_index)
+    print(bin_edges[main_peak_index])
+
+    # If the main peak's value is below the threshold, find the next peak
+    while bin_edges[main_peak_index] < -1:
+        hist[main_peak_index] = 0  # Set the current peak's value to 0
+        main_peak_index = np.argmax(hist)  # Find the next peak
+
+    # Starting from the main peak, find vmin by moving left until the count drops below the threshold
+    for i in range(main_peak_index, 0, -1):
+        if hist[i] < threshold_low:
+            vmin = bin_edges[i]
+            break
+    else:
+        vmin = bin_edges[0]
+
+    # Starting from the main peak, find vmax by moving right until the count drops below the threshold
+    for i in range(main_peak_index, len(hist) - 1):
+        if hist[i] < threshold_high:
+            vmax = bin_edges[i + 1]
+            break
+    else:
+        vmax = bin_edges[-1]
+
+    return vmin, vmax
+def export_results(visibility, vmin, vmax, color_choice, color_factor, standardize=False, optimize_vrange=True):
     def adjust_color(color, color_factor, h_color):
         r, g, b = color
 
@@ -95,8 +121,27 @@ def export_results(visibility, vmin, vmax, color_choice, color_factor, standardi
             b += adjusted_color_factor * (1 - b)  # Increase blue but ensure it doesn't exceed 1
             return r, g, min(b,1)  # Ensure doesn't exceed 1
 
+
+    if standardize:
+        vmin = np.percentile(visibility, 1)  # 1st percentile
+        vmax = np.percentile(visibility, 99)
+    if optimize_vrange:
+        vmin, vmax = compute_optimal_vmin_vmax(visibility)
+
+    # Normalize data
+    normalized_data = (visibility - vmin) / (vmax - vmin)
+
+    grayscale_img = (normalized_data * 255).astype(np.uint8)
+
+    # Apply histogram equalization
+    #equalized_img = cv2.equalizeHist(grayscale_img)
+
+    # Convert back to float range [0, 1] for coloring
+    #equalized_data = equalized_img.astype(np.float32) / 255.0
+
+
     # Original colors
-    colors = [(255, 255, 255), (150, 150, 150), (120, 120, 120), (0, 0, 0)]
+    colors = [(255, 255, 255),(50, 50, 50)]
     colors_scaled = [np.array(x).astype(np.float32) / 255 for x in colors]
 
     # Adjust colors
