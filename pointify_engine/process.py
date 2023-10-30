@@ -58,10 +58,14 @@ class ODMThread(QThread):
         self.feat_qual = feature_qual
         self.pc_qual = pc_qual
         self.project_path = project_path
+        self.alt_way = True
 
     def run(self):
         path = ODM_PATH
-        cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--end-with', 'odm_filterpoints']
+        if self.alt_way:
+            cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--pc-csv', '--dsm']
+        else:
+            cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--pc-csv', '--end-with', 'odm_filterpoints']
 
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, shell=True)
 
@@ -1140,13 +1144,14 @@ def raster_top_rgb_height_pcv(cloud_path, grid_step):
 def raster_top_rgb_height(cloud_path, grid_step):
     (cloud_dir, cloudname) = os.path.split(cloud_path)
     cc_cloud = '"' + cloud_path + '"'
-    proj = ' -SF_PROJ MAX -PROJ MAX'
+    proj1 = ' -SF_PROJ MAX -PROJ MAX'
+    proj2 = ' -SF_PROJ AVG -PROJ AVG'
 
     function_name = 'raster'
 
-    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
-               + str(grid_step) + ' -OUTPUT_RASTER_RGB -RASTERIZE' + proj + ' -VERT_DIR 2 -GRID_STEP ' \
-               + str(grid_step) + ' -OUTPUT_RASTER_Z'
+    function = ' -AUTO_SAVE OFF -NO_TIMESTAMP -RASTERIZE' + proj1 + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_RGB -RASTERIZE' + proj2 + ' -VERT_DIR 2 -GRID_STEP ' \
+               + str(grid_step) + ' -EMPTY_FILL INTERP -OUTPUT_RASTER_Z'
 
     # Prepare CloudCompare function
     fun_txt = 'SET MY_PATH="' + CC_PATH + '" \n' + '%MY_PATH% -SILENT -O ' + cc_cloud + function
@@ -1868,6 +1873,9 @@ def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
     # convert image to numpy array
     rgb = np.asarray(image)
 
+    if rgb.shape[-1] == 4:
+        rgb = rgb[:, :, :3]
+
     # 1. Create a path object from the polygon coordinates
     path = mpath.Path(coords)
 
@@ -1889,6 +1897,7 @@ def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
 
     xyz_points = np.column_stack((x_coords_meters, y_coords_meters, heights_inside_polygon))
     color_array = rgb_inside_polygon
+    print(color_array)
 
     return xyz_points, color_array
 
@@ -2116,6 +2125,8 @@ def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='stand
     if low_limit != 0:
         elevation[elevation >= high_limit] = high_limit
 
+    # interpolation
+
 
     # Plot the altitude data with the colormap
     if type =='standard':
@@ -2199,7 +2210,6 @@ def compute_volume(elevation, ground, mask_array, res):
     for coord in mask_non_zero_coords:
         x, y = coord
         z_diff = elevation[x,y] - ground[x,y]
-        print(f'z_diff:{z_diff}')
         value = z_diff*res*res
         volume += value
 
