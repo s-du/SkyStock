@@ -38,12 +38,15 @@ threshold = 0.5
 class_name_dict = {0: 'stock_pile', 1: 'vehicle', 2: 'building', 3: 'stock_with_wall', 4: 'in_construction'}
 
 
+
+
+
 class SkyStock(QtWidgets.QMainWindow):
     """
     Main Window class for the Nok-out application.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, is_dark_theme, parent=None):
         """
         Function to initialize the class
         :param parent:
@@ -83,22 +86,27 @@ class SkyStock(QtWidgets.QMainWindow):
         # initialize status
         self.update_progress(nb=100, text="Status: Choose point cloud!")
 
-        # Add icons to buttons
-        self.add_icon(res.find('img/cloud.png'), self.actionLoad)
-        self.add_icon(res.find('img/folder.png'), self.actionPhotogr)
-        self.add_icon(res.find('img/point.png'), self.actionSelectPoint)
-        self.add_icon(res.find('img/crop.png'), self.actionCrop)
-        self.add_icon(res.find('img/hand.png'), self.actionHand_selector)
-        self.add_icon(res.find('img/yolo2.png'), self.actionDetect)
-        self.add_icon(res.find('img/magic.png'), self.actionSuperSam)
-        self.add_icon(res.find('img/inventory.png'), self.actionShowInventory)
-        self.add_icon(res.find('img/profile.png'), self.actionLineMeas)
-        self.add_icon(res.find('img/alti.png'), self.actionCropHeight)
-        self.add_icon(res.find('img/poly.png'), self.actionPolySeg)
+        if is_dark_theme:
+            suf = '_white'
+        else:
+            suf = ''
 
-        self.add_icon(res.find('img/poly.png'), self.pushButton_show_poly)
-        self.add_icon(res.find('img/square.png'), self.pushButton_show_bbox)
-        self.add_icon(res.find('img/data.png'), self.pushButton_show_infos)
+        # Add icons to buttons
+        self.add_icon(res.find(f'img/icons/cloud{suf}.png'), self.actionLoad)
+        self.add_icon(res.find(f'img/icons/folder{suf}.png'), self.actionPhotogr)
+        self.add_icon(res.find(f'img/icons/point{suf}.png'), self.actionSelectPoint)
+        self.add_icon(res.find(f'img/icons/crop{suf}.png'), self.actionCrop)
+        self.add_icon(res.find(f'img/icons/hand{suf}.png'), self.actionHand_selector)
+        self.add_icon(res.find(f'img/icons/yolo2{suf}.png'), self.actionDetect)
+        self.add_icon(res.find(f'img/icons/magic{suf}.png'), self.actionSuperSam)
+        self.add_icon(res.find(f'img/icons/inventory{suf}.png'), self.actionShowInventory)
+        self.add_icon(res.find(f'img/icons/profile{suf}.png'), self.actionLineMeas)
+        self.add_icon(res.find(f'img/icons/alti{suf}.png'), self.actionCropHeight)
+        self.add_icon(res.find(f'img/icons/poly{suf}.png'), self.actionPolySeg)
+
+        self.add_icon(res.find(f'img/icons/poly{suf}.png'), self.pushButton_show_poly)
+        self.add_icon(res.find(f'img/icons/square{suf}.png'), self.pushButton_show_bbox)
+        self.add_icon(res.find(f'img/icons/data{suf}.png'), self.pushButton_show_infos)
 
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
@@ -132,6 +140,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.treeView.setModel(self.model)
 
         # reset list of stockpiles
+
+
 
     def add_icon(self, img_source, pushButton_object):
         """
@@ -938,9 +948,16 @@ def main(argv=None):
         app = QtWidgets.QApplication(argv)
         app.setStyle('Fusion')
 
+        # test if dark theme is used
+        palette = app.palette()
+        bg_color = palette.color(QtGui.QPalette.Window)
+
+        is_dark_theme = bg_color.lightness() < 128
+        print(is_dark_theme)
+
     # create the main window
 
-    window = SkyStock()
+    window = SkyStock(is_dark_theme)
     window.showMaximized()
 
     # run the application if necessary
