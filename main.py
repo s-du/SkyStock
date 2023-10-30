@@ -87,7 +87,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.update_progress(nb=100, text="Status: Choose point cloud!")
 
         if is_dark_theme:
-            suf = '_white'
+            suf = '_white_white_tint'
         else:
             suf = ''
 
