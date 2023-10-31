@@ -46,6 +46,7 @@ SPAN = 0.03
 ODM_PATH = r'D:\Python2023\PyODM\resources\ODM\run.bat'
 ODM_DEFAULT_MESH_OCTREE_LIST = [8,9,10,11,12]
 ODM_DEFAULT_PC_QUALITY_LIST = ['low', 'medium', 'high', 'ultra']
+ODM_DEM_RES = 0.05
 # TODO: add estimation of computation time depending on quality
 
 
@@ -63,7 +64,7 @@ class ODMThread(QThread):
     def run(self):
         path = ODM_PATH
         if self.alt_way:
-            cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--pc-csv', '--dsm']
+            cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--mesh-octree-depth', '10', '--pc-csv', '--dsm']
         else:
             cmd = [path, "--project-path", self.project_path, '--feature-quality', self.feat_qual, '--pc-quality', self.pc_qual, '--pc-csv', '--end-with', 'odm_filterpoints']
 
@@ -289,6 +290,10 @@ class NokPointCloud:
         self.high_point = 0
         self.low_point = 0
 
+        # possible external data
+        self.dsm_file_path = ''
+        self.ortho_file_path = ''
+
     def update_dirs(self):
         self.location_dir, self.file = os.path.split(self.path)
 
@@ -357,9 +362,10 @@ class NokPointCloud:
     def image_selection(self):
         if self.res == 0:
             self.res = round(self.density * 4, 3) * 1000
+        elif self.dsm_file_path:
+            self.res = ODM_DEM_RES * 1000 # default dem resolution from ODM
+
         print(f'the image resolution is {self.res}')
-        # raster_top_rgb_height_pcv(self.path, self.res / 1000)
-        raster_top_rgb_height(self.path, self.res / 1000)
 
         # create new path for dtm
         path_top = os.path.join(self.img_dir, 'top.tif')
@@ -370,14 +376,25 @@ class NokPointCloud:
         path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
         path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
 
-        self.view_names.extend(['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
-        self.view_paths.extend([path_top, path_pcv, path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
+        self.view_names.extend(
+            ['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
+        self.view_paths.extend(
+            [path_top, path_pcv, path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
 
-        # relocate image file
-        img_list = generate_list('.tif', self.location_dir)
-        print(f'image list {img_list}')
-        os.rename(img_list[0], path_top)
-        os.rename(img_list[1], path_dtm)
+
+        if not self.dsm_file_path:
+            raster_top_rgb_height(self.path, self.res / 1000)
+            # raster_top_rgb_height_pcv(self.path, self.res / 1000)
+
+            # relocate image file
+            img_list = generate_list('.tif', self.location_dir)
+            print(f'image list {img_list}')
+            os.rename(img_list[0], path_top)
+            os.rename(img_list[1], path_dtm)
+        else:
+            # relocate ODM files
+            os.rename(self.dsm_file_path, path_dtm)
+            os.rename(self.ortho_file_path, path_top)
 
         # store height data
         with rio.open(path_dtm) as src:
@@ -1876,6 +1893,19 @@ def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
     if rgb.shape[-1] == 4:
         rgb = rgb[:, :, :3]
 
+    # Get the dimensions of both images
+    rgb_shape = rgb.shape
+    elevation_shape = elevation.shape
+
+    # Check if the shapes are not the same
+    if rgb_shape != elevation_shape:
+        # Determine which image is larger
+        if rgb_shape[0] > elevation_shape[0] or rgb_shape[1] > elevation_shape[1]:
+            # Resize the RGB image to match the elevation image
+            img_rgb = image.resize((elevation_shape[1], elevation_shape[0]))
+            rgb = np.asarray(img_rgb)
+
+
     # 1. Create a path object from the polygon coordinates
     path = mpath.Path(coords)
 
@@ -2081,6 +2111,23 @@ def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_
     rgb = np.asarray(img_rgba)
     elevation = np.asarray(Image.open(elevation_path))
     hillshade = np.asarray(Image.open(hillshade_path))
+
+    # Get the dimensions of both images
+    rgb_shape = rgb.shape
+    elevation_shape = elevation.shape
+
+    # Check if the shapes are not the same
+    if rgb_shape != elevation_shape:
+        # Determine which image is larger
+        if rgb_shape[0] > elevation_shape[0] or rgb_shape[1] > elevation_shape[1]:
+            # Resize the RGB image to match the elevation image
+            img_rgba = img_rgba.resize((elevation_shape[1], elevation_shape[0]))
+            rgb = np.asarray(img_rgba)
+        else:
+            # Resize the elevation image to match the RGB image
+            elevation_img = Image.open(elevation_path)
+            elevation_img = elevation_img.resize((rgb_shape[1], rgb_shape[0]))
+            elevation = np.asarray(elevation_img)
 
     foreground = hillshade  # Inputs to blend_modes need to be numpy arrays.
     foreground_float = foreground.astype(float)  # Inputs to blend_modes need to be floats.

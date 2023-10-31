@@ -17,7 +17,21 @@
    <string>SkyStock</string>
   </property>
   <property name="styleSheet">
-   <string notr="true"/>
+   <string notr="true">QProgressBar {
+text-align: center;
+color: rgb(240, 240, 240);
+border-width: 1px; 
+border-radius: 10px;
+border-color: rgb(230, 230, 230);
+border-style: solid;
+background-color:rgb(207,207,207);
+}
+
+QProgressBar:chunk {
+background-color:rgb(50, 156, 179);
+border-radius: 10px;
+}
+</string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
@@ -260,7 +274,9 @@
     <property name="title">
      <string>File</string>
     </property>
+    <addaction name="actionLoad_Project"/>
     <addaction name="actionLoad"/>
+    <addaction name="actionPhotogr"/>
    </widget>
    <widget class="QMenu" name="menuAbout">
     <property name="title">
@@ -291,6 +307,7 @@
    <attribute name="toolBarBreak">
     <bool>false</bool>
    </attribute>
+   <addaction name="actionLoad_Project"/>
    <addaction name="actionLoad"/>
    <addaction name="actionPhotogr"/>
    <addaction name="separator"/>
@@ -309,7 +326,7 @@
   </widget>
   <action name="actionLoad">
    <property name="text">
-    <string>Load</string>
+    <string>Load Point Cloud</string>
    </property>
    <property name="toolTip">
     <string>Load a point cloud</string>
@@ -415,7 +432,7 @@
   </action>
   <action name="actionPhotogr">
    <property name="text">
-    <string>Photogr</string>
+    <string>Create 3D from images</string>
    </property>
    <property name="toolTip">
     <string>Create point cloud from images</string>
@@ -424,6 +441,11 @@
   <action name="actionPolySeg">
    <property name="text">
     <string>PolySeg</string>
+   </property>
+  </action>
+  <action name="actionLoad_Project">
+   <property name="text">
+    <string>Load Project</string>
    </property>
   </action>
  </widget>
