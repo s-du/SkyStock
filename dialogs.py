@@ -144,7 +144,6 @@ class MySliderDemo(QtWidgets.QDialog):
         single_step_value = ((max_data - min_data) / 20)*10
         print(single_step_value)
 
-
         self.canvas = MyCanvas(data=self.data)
 
         layout = QtWidgets.QVBoxLayout()

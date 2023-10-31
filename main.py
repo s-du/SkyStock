@@ -66,6 +66,9 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.stocks_inventory = []
 
+        # list of line measurements
+        self.line_meas_list = []
+
         # add actions to action group
         ag = QtGui.QActionGroup(self)
         ag.setExclusive(True)
@@ -106,6 +109,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.add_icon(res.find(f'img/icons/poly{suf}.png'), self.pushButton_show_poly)
         self.add_icon(res.find(f'img/icons/square{suf}.png'), self.pushButton_show_bbox)
         self.add_icon(res.find(f'img/icons/data{suf}.png'), self.pushButton_show_infos)
+        self.add_icon(res.find(f'img/icons/legend{suf}.png'), self.pushButton_show_linemeas)
 
         self.viewer = wid.PhotoViewer(self)
         self.horizontalLayout_2.addWidget(self.viewer)
@@ -137,6 +141,10 @@ class SkyStock(QtWidgets.QMainWindow):
         self.model = QtGui.QStandardItemModel()
         self.model.setHeaderData(0, QtCore.Qt.Horizontal, 'Files')
         self.treeView.setModel(self.model)
+        self.treeView.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.selmod = self.treeView.selectionModel()
+
+        self.selmod.selectionChanged.connect(self.on_tree_change)
 
         # reset list of stockpiles
         self.stocks_inventory = []
@@ -169,6 +177,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.pushButton_show_poly.clicked.connect(self.toggle_poly)
         self.pushButton_show_bbox.clicked.connect(self.toggle_bboxes)
         self.pushButton_show_infos.clicked.connect(self.toggle_infos)
+        self.pushButton_show_linemeas.clicked.connect(self.toggle_lines_meas)
 
         self.comboBox.currentIndexChanged.connect(self.on_img_combo_change)
         self.viewer.endDrawing_rect.connect(self.perform_crop)
@@ -330,8 +339,11 @@ class SkyStock(QtWidgets.QMainWindow):
             # change the low and high point in the point cloud object --> It should have impact on the cropping
             self.current_cloud.low_point = dialog.slider_low.value()
             self.current_cloud.high_point = dialog.slider_high.value()
+            self.current_cloud.recompute_elevation()
 
-    def get_ground_profile(self):
+    def get_ground_profile(self, line_obj):
+        self.line_meas_list.append(line_obj)
+
         values = self.viewer.line_values_final
         x = np.linspace(0, len(values) * self.current_cloud.res / 1000, num=len(values))
         plt.plot(x, values, color=(1, 0, 1))
@@ -340,6 +352,7 @@ class SkyStock(QtWidgets.QMainWindow):
         plt.xlabel('Distance [m]')
         plt.show()
 
+        self.pushButton_show_linemeas.setEnabled(True)
         self.hand_pan()
 
     def add_poly_seg(self):
@@ -465,6 +478,8 @@ class SkyStock(QtWidgets.QMainWindow):
                                                       self.current_cloud.ground_data,
                                                       stock_obj.mask, self.current_cloud.res / 1000)
 
+            stock_obj.true_area = process.compute_true_surface(self.current_cloud.height_data, stock_obj.mask, self.current_cloud.res / 1000)
+
             # create new point cloud object
             stock_pc, color_array = process.create_pc_from_elevation_coords(elevation,
                                                                             self.current_cloud.view_paths[0],
@@ -472,6 +487,7 @@ class SkyStock(QtWidgets.QMainWindow):
                                                                             self.current_cloud.res / 1000)
             pcd = o3d.geometry.PointCloud()
             color_array_normalized = color_array / 255.0
+
             pcd.points = o3d.utility.Vector3dVector(stock_pc)
             pcd.colors = o3d.utility.Vector3dVector(color_array_normalized)
 
@@ -610,7 +626,10 @@ class SkyStock(QtWidgets.QMainWindow):
             self.viewer.add_list_poly(self.stocks_inventory)
 
     def toggle_lines_meas(self):
-        pass
+        if not self.pushButton_show_linemeas.isChecked():
+            self.viewer.clean_scene_line()
+        else:
+            self.viewer.add_list_linemeas(self.line_meas_list)
 
     def inventory_canva(self):
         image_list = []
@@ -690,6 +709,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionHand_selector.setChecked(True)
         self.viewer.rect = False
         self.viewer.select_point = False
+        self.viewer.line_meas = False
         self.viewer.toggleDragMode()
 
         self.update_progress(text='Yon can pan the image!')
@@ -767,6 +787,13 @@ class SkyStock(QtWidgets.QMainWindow):
         self.current_cloud = self.Nokclouds[-1]
         self.add_item_in_tree(self.model, self.Nokclouds[-1].name)  # signal a tree change
 
+        nb_pc = len(self.Nokclouds)
+        build_idx = self.model.index(nb_pc - 1, 0)
+        self.selmod.clearSelection()
+
+        self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
+        self.treeView.expandAll()
+
         # load image
         self.comboBox.setEnabled(True)
         self.image_loaded = True
@@ -775,16 +802,10 @@ class SkyStock(QtWidgets.QMainWindow):
         self.comboBox.addItems(self.current_cloud.view_names)
         self.on_img_combo_change()
 
-        nb_pc = len(self.Nokclouds)
-        build_idx = self.model.index(nb_pc - 1, 0)
-        self.selmod.clearSelection()
-
-        self.selmod.setCurrentIndex(build_idx, QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
-        self.treeView.expandAll()
-
         # store pc height data
-        self.height_values = self.current_cloud.height_data
-        self.viewer.set_height_data(self.height_values)
+        if name == 'Original_point_cloud':
+            self.height_values = self.current_cloud.height_data
+            self.viewer.set_height_data(self.height_values)
 
         # add dual viewer images
         img1 = self.current_cloud.view_paths[0]
@@ -798,12 +819,16 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionSelectPoint.setEnabled(True)
         self.actionHand_selector.setEnabled(True)
         self.actionLineMeas.setEnabled(True)
+        self.actionPolySeg.setEnabled(True)
+        self.actionCropHeight.setEnabled(True)
 
     def process_pointcloud(self, pc, gsd=True, selection=True, orient=False, ransac=False, mesh=False,
                            load_images=False):
         # 1. BASIC DATA ____________________________________________________________________________________________________
         # read full high definition point cloud (using open3d)
         print('Reading the point cloud!')
+
+        self.update_progress(nb = 10, text='Reading point cloud...')
         pc.do_preprocess()
 
         density = pc.density
@@ -837,6 +862,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # 5. GENERATE BASIC VIEWS_______________________________________________________
         print('Launching RGB render/exterior views creation...')
+        self.update_progress(nb=30, text='Launching RGB render/exterior views creation...')
         if load_images:
             pc.get_existing_images()
         elif selection:
@@ -844,6 +870,36 @@ class SkyStock(QtWidgets.QMainWindow):
             # process
         else:
             pc.create_standard_images()
+
+
+    def toggle_top_view_functions(self, enable):
+        if enable:
+            # enable action(s)
+            self.actionCrop.setEnabled(True)
+            self.actionLineMeas.setEnabled(True)
+            self.actionDetect.setEnabled(True)
+            self.actionSelectPoint.setEnabled(True)
+            self.actionHand_selector.setEnabled(True)
+            self.actionLineMeas.setEnabled(True)
+            self.actionPolySeg.setEnabled(True)
+            self.actionCropHeight.setEnabled(True)
+
+            self.viewer.add_list_infos(self.stocks_inventory)
+            self.viewer.add_list_boxes(self.stocks_inventory)
+            self.viewer.add_list_poly(self.stocks_inventory)
+        else:
+            self.actionCrop.setEnabled(False)
+            self.actionLineMeas.setEnabled(False)
+            self.actionDetect.setEnabled(False)
+            self.actionSelectPoint.setEnabled(False)
+            self.actionHand_selector.setEnabled(False)
+            self.actionLineMeas.setEnabled(False)
+            self.actionPolySeg.setEnabled(False)
+            self.actionCropHeight.setEnabled(False)
+
+            self.viewer.clean_scene_text()
+            self.viewer.clean_scene_rectangle()
+            self.viewer.clean_scene_poly()
 
     def on_tree_change(self):
         print('CHANGED!')
@@ -853,6 +909,11 @@ class SkyStock(QtWidgets.QMainWindow):
             sel_item = self.model.itemFromIndex(indexes[0])
             print(indexes[0])
 
+            if sel_item.text() == 'Original_point_cloud':
+                self.toggle_top_view_functions(True)
+            else:
+                self.toggle_top_view_functions(False)
+
             for cloud in self.Nokclouds:
                 if cloud.name == sel_item.text():
                     self.current_cloud = cloud
@@ -860,19 +921,26 @@ class SkyStock(QtWidgets.QMainWindow):
 
                     self.comboBox.clear()
                     self.comboBox.addItems(self.current_cloud.view_names)
+
+
         else:
             print("No items selected.")
 
     def on_img_combo_change(self):
         self.actionCrop.setEnabled(True)
         i = self.comboBox.currentIndex()
+        indexes = self.treeView.selectedIndexes()
+        sel_item = self.model.itemFromIndex(indexes[0])
+
         if i < 0:
             i = 0
         self.current_view = self.current_cloud.view_names[i]
-        print(i)
-        print(self.current_view)
-        if self.current_view != 'top':
-            self.actionCrop.setEnabled(False)
+
+        if self.current_view == 'top':
+            if sel_item.text() == 'Original_point_cloud':
+                self.toggle_top_view_functions(True)
+        else:
+            self.toggle_top_view_functions(False)
 
         img_paths = self.current_cloud.view_paths
         if self.image_loaded:

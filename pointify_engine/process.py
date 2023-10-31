@@ -19,6 +19,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Signal, QRunnable, QObject, QProcess, QThread
 from scipy.signal import find_peaks
 from scipy.interpolate import griddata
+from scipy.spatial import Delaunay
 from blend_modes import multiply, hard_light
 import resources as res
 from pointify_engine import simplepcv as spcv
@@ -174,6 +175,7 @@ class StockPileObject:
         self.mask_rgb_cropped = None
         self.coords = None
         self.area = 0
+        self.true_area = 0
         self.volume = 0
         self.to_check = True # if initiated from YOLO, needs to be checked by user
 
@@ -376,6 +378,8 @@ class NokPointCloud:
     def create_height_distib(self):
         pass
     def get_existing_images(self):
+        self.res = ODM_DEM_RES * 1000
+
         self.view_names.extend(
             ['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
         self.view_paths.extend(
@@ -1825,6 +1829,8 @@ def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
             img_rgb = image.resize((elevation_shape[1], elevation_shape[0]))
             rgb = np.asarray(img_rgb)
 
+            if rgb.shape[-1] == 4:
+                rgb = rgb[:, :, :3]
 
     # 1. Create a path object from the polygon coordinates
     path = mpath.Path(coords)
@@ -2181,3 +2187,47 @@ def compute_volume(elevation, ground, mask_array, res):
         volume += value
 
     return volume
+
+def compute_true_surface(elevation, mask_array, res):
+    def triangle_area(A, B, C):
+        """Compute the area of a triangle given its vertices A, B, C."""
+        AB = B - A
+        AC = C - A
+        N = np.cross(AB, AC)
+        return 0.5 * np.linalg.norm(N)
+
+    def compute_3d_surface_area_scaled(coords, elevation, scale=0.05):
+        """
+        Compute the 3D surface area given 2D coordinates (coords), an elevation array, and a scale factor.
+        """
+        # Scale the x and y coordinates
+        coords_scaled = coords * scale
+
+        # Extract z-values from the elevation array using the x and y coordinates
+        z_values = [elevation[int(coord[0]), int(coord[1])] for coord in coords]
+
+        # Perform Delaunay triangulation on the scaled 2D coords
+        triangulation = Delaunay(coords_scaled)
+
+        # Compute the total surface area
+        total_area = 0
+        for triangle in triangulation.simplices:
+            A = np.array([coords_scaled[triangle[0]][0], coords_scaled[triangle[0]][1], z_values[triangle[0]]])
+            B = np.array([coords_scaled[triangle[1]][0], coords_scaled[triangle[1]][1], z_values[triangle[1]]])
+            C = np.array([coords_scaled[triangle[2]][0], coords_scaled[triangle[2]][1], z_values[triangle[2]]])
+            total_area += triangle_area(A, B, C)
+
+        return total_area
+
+    tolerance_lower = 0
+    tolerance_upper = 10
+
+    # create a true intensity image
+    mask_array = mask_array[:, :, 2]
+    interest_mask = cv2.inRange(mask_array, tolerance_lower, tolerance_upper)
+
+    mask_non_zero_coords = np.argwhere(interest_mask != 0)
+
+    surface = compute_3d_surface_area_scaled(mask_non_zero_coords, elevation, scale=res)
+
+    return surface

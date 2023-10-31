@@ -668,7 +668,7 @@ class PhotoViewer(QGraphicsView):
     photoClicked = Signal(QPoint)
     endDrawing_rect = Signal()
     end_point_selection = Signal()
-    endDrawing_line_meas = Signal()
+    endDrawing_line_meas = Signal(QGraphicsLineItem)
 
     def __init__(self, parent):
         super(PhotoViewer, self).__init__(parent)
@@ -847,25 +847,26 @@ class PhotoViewer(QGraphicsView):
         for el in list_objects:
             x1, y1, x2, y2, score, class_id = el.yolo_bbox
             text = el.name
-            text2 = str(round(el.area, 2)) + 'm² '
-            text3 = str(round(el.volume, 2)) + 'm³'
-
-            print(f'adding {text} to viewer')
+            text2 = 'Gnd area:' + str(round(el.area, 2)) + 'm² '
+            text3 = 'True area:' + str(round(el.true_area, 2)) + 'm² '
+            text4 = 'Vol:' + str(round(el.volume, 2)) + 'm³'
 
             # add text 1
             text_item = QGraphicsTextItem()
-            text_item.setPos(x1, y1)
+            text_item.setDefaultTextColor(Qt.black)
+            text_item.setPos(x1+(x2-x1)/2, y1+(y2-y1)/2)
             text_item.setHtml(
-                "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text + "</div>")
+                "<div style='background-color:rgba(255, 255, 255, 0.5);'>" + text + "</div>")
 
             self._scene.addItem(text_item)
 
             if not only_name:
                 # add text 2 and 3
                 text_item2 = QGraphicsTextItem()
+                text_item2.setDefaultTextColor(Qt.black)
                 text_item2.setPos(x1, y2)
                 text_item2.setHtml(
-                    "<div style='background-color:rgba(255, 255, 255, 0.3);'>" + text2 + "<br>" + text3 + " </div>")
+                    "<div style='background-color:rgba(255, 255, 255, 0.5);'>" + text2 + "<br>" + text3 + "<br>" + text4 + "</div>")
                 self._scene.addItem(text_item2)
 
     def add_list_boxes(self, list_objects):
@@ -881,6 +882,10 @@ class PhotoViewer(QGraphicsView):
 
             # add elements to scene
             self._scene.addItem(box)
+
+    def add_list_linemeas(self, list_objects):
+        for line in list_objects:
+            self._scene.addItem(line)
 
     def get_coord(self, QGraphicsRect):
         rect = QGraphicsRect.rect()
@@ -975,13 +980,12 @@ class PhotoViewer(QGraphicsView):
                 # compute line values
                 p1 = np.array([int(self.origin.x()), int(self.origin.y())])
                 p2 = np.array([int(self.new_coord.x()), int(self.new_coord.y())])
-                print(p1, p2)
                 line_values = createLineIterator(p1, p2, self.height_values)
 
                 self.line_values_final = line_values[:, 2]
 
                 # emit signal (end of measure)
-                self.endDrawing_line_meas.emit()
+                self.endDrawing_line_meas.emit(self._current_line_item)
                 print('Line meas. added')
 
             self.origin = QPoint()
