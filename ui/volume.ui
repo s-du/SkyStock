@@ -423,6 +423,9 @@ border-radius: 10px;
    </property>
   </action>
   <action name="actionCropHeight">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
    <property name="text">
     <string>CropHeight</string>
    </property>
@@ -439,6 +442,9 @@ border-radius: 10px;
    </property>
   </action>
   <action name="actionPolySeg">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
    <property name="text">
     <string>PolySeg</string>
    </property>

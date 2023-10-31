@@ -73,6 +73,7 @@ class SkyStock(QtWidgets.QMainWindow):
         ag.addAction(self.actionHand_selector)
         ag.addAction(self.actionSelectPoint)
         ag.addAction(self.actionLineMeas)
+        ag.addAction(self.actionPolySeg)
 
         # Create model (for the tree structure)
         self.model = QtGui.QStandardItemModel()
@@ -138,6 +139,8 @@ class SkyStock(QtWidgets.QMainWindow):
         self.treeView.setModel(self.model)
 
         # reset list of stockpiles
+        self.stocks_inventory = []
+        self.Nokclouds = []
 
     def add_icon(self, img_source, pushButton_object):
         """
@@ -149,6 +152,7 @@ class SkyStock(QtWidgets.QMainWindow):
         """
         Link signals to slots
         """
+        self.actionLoad_Project.triggered.connect(self.load_project)
         self.actionLoad.triggered.connect(self.get_pointcloud)
         self.actionPhotogr.triggered.connect(self.odm_start)
         self.actionSelectPoint.triggered.connect(self.detect_stock)
@@ -173,9 +177,33 @@ class SkyStock(QtWidgets.QMainWindow):
 
         self.selmod.selectionChanged.connect(self.on_tree_change)
 
+    # Load project
+    def load_project(self):
+        # get folder
+        out_dir = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select Skystock folder"))
+        while True:
+            if not out_dir:  # User clicked 'Cancel'
+                break
+            if not os.path.isdir(out_dir):  # Check if it's a valid directory
+                QtWidgets.QMessageBox.warning(self, "Warning", "Oops! Not a folder!")
+            elif 'SkyStock' not in out_dir:  # Check if it's a SkyStock folder
+                QtWidgets.QMessageBox.warning(self, "Warning", "Oops! It does not look like a SkyStock folder!")
+            else:
+                break  # If directory is valid and it's a SkyStock folder, exit the loop
+            out_dir = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select Skystock folder"))
+
+        if out_dir:
+            # reset_data
+            self.reset_parameters()
+            # load data
+            self.app_dir = out_dir
+            path = os.path.join(self.app_dir, 'code', 'odm_filterpoints', 'point_cloud.ply')
+
+            self.create_point_cloud_object(path, 'Original_point_cloud', gsd=False, load_images=True)
+
     # ODM Related_______________________________________________
     def odm_start(self):
-        # get output directory (for all files)
+        # get output direcself.app_dir = os.path.join(out_dirtory (for all files)
         out_dir = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select output_folder"))
         while not os.path.isdir(out_dir):
             QtWidgets.QMessageBox.warning(self, "Warning",
@@ -268,6 +296,8 @@ class SkyStock(QtWidgets.QMainWindow):
         elif 'ODM app finished' in str:
             self.update_progress(nb=100, text='Reconstruction finished')
 
+        # TODO: complete list
+
     def odm_post_process(self):
         print('ok success!')
         path = os.path.join(self.app_dir, 'code', 'odm_filterpoints', 'point_cloud.ply')
@@ -276,7 +306,8 @@ class SkyStock(QtWidgets.QMainWindow):
         ortho_path = os.path.join(self.app_dir, 'code', 'odm_orthophoto', 'odm_orthophoto.tif')
         dsm_path = os.path.join(self.app_dir, 'code', 'odm_dem', 'dsm.tif')
 
-        self.create_point_cloud_object(path, 'Original_point_cloud', gsd=False, dsm_path=dsm_path, ortho_path=ortho_path)
+        self.create_point_cloud_object(path, 'Original_point_cloud', gsd=False, dsm_path=dsm_path,
+                                       ortho_path=ortho_path)
 
         self.update_progress(text='Choose a functionality!')
         self.actionLoad.setEnabled(False)
@@ -466,6 +497,7 @@ class SkyStock(QtWidgets.QMainWindow):
             """
 
         else:
+            stock_obj = None
             to_pop = True
 
         return stock_obj, to_pop
@@ -556,7 +588,6 @@ class SkyStock(QtWidgets.QMainWindow):
             self.viewer.toggleDragMode()
 
             self.update_progress(text='Click on a stock!')
-
 
     # VIEWER RELATED TOOLS ----------------------------------------------------------
 
@@ -694,7 +725,7 @@ class SkyStock(QtWidgets.QMainWindow):
         self.update_progress(text='Choose a functionality!')
 
     def create_point_cloud_object(self, path, name, selection=True, gsd=True, orient=False, ransac=False,
-                                  mesh=False, ortho_path='', dsm_path='', keep_previous=True):
+                                  mesh=False, ortho_path='', dsm_path='', keep_previous=True, load_images=False):
         """
 
         :param path: path to the point cloud file [str]
@@ -711,19 +742,14 @@ class SkyStock(QtWidgets.QMainWindow):
         """
         cloud = process.NokPointCloud()
         if not keep_previous:
-            self.Nokclouds = [] # reset list of point clouds
+            self.Nokclouds = []  # reset list of point clouds
 
         cloud.path = path
         cloud.update_dirs()
         cloud.name = name
 
-        cloud.folder = os.path.join(self.app_dir, cloud.name)
-        cloud.processed_data_dir = os.path.join(cloud.folder, 'processes')
-        cloud.img_dir = os.path.join(cloud.folder, 'images')
-
-        process.new_dir(cloud.folder)
-        process.new_dir(cloud.processed_data_dir)
-        process.new_dir(cloud.img_dir)
+        folder = os.path.join(self.app_dir, cloud.name)
+        cloud.create_data_folders(folder)
 
         # add dsm and ortho path if available:
         if ortho_path:
@@ -732,7 +758,7 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # generate all basic data
         self.process_pointcloud(cloud, selection=selection, gsd=gsd, orient=orient, ransac=ransac,
-                                mesh=mesh)
+                                mesh=mesh, load_images=load_images)
 
         # add point cloud to list of clouds
         self.Nokclouds.append(cloud)  # note: self.Nokclouds[0] is always the original point cloud
@@ -773,21 +799,21 @@ class SkyStock(QtWidgets.QMainWindow):
         self.actionHand_selector.setEnabled(True)
         self.actionLineMeas.setEnabled(True)
 
-    def process_pointcloud(self, pc, gsd=True, selection=True, orient=False, ransac=False, mesh=False):
+    def process_pointcloud(self, pc, gsd=True, selection=True, orient=False, ransac=False, mesh=False,
+                           load_images=False):
         # 1. BASIC DATA ____________________________________________________________________________________________________
         # read full high definition point cloud (using open3d)
         print('Reading the point cloud!')
         pc.do_preprocess()
 
-        # let user choose GSD
-        img_1 = res.find('img/2cm.png')
-        img_2 = res.find('img/5cm.png')
-        img_3 = res.find('img/10cm.png')
-        img_4 = res.find('img/20cm.png')
-        list_img = [img_1, img_2, img_3, img_4]
-
         density = pc.density
         if gsd:
+            # let user choose GSD
+            img_1 = res.find('img/2cm.png')
+            img_2 = res.find('img/5cm.png')
+            img_3 = res.find('img/10cm.png')
+            img_4 = res.find('img/20cm.png')
+            list_img = [img_1, img_2, img_3, img_4]
             dialog = dia.SelectGsd(list_img, density)
             dialog.setWindowTitle("Select best output")
 
@@ -811,11 +837,13 @@ class SkyStock(QtWidgets.QMainWindow):
 
         # 5. GENERATE BASIC VIEWS_______________________________________________________
         print('Launching RGB render/exterior views creation...')
-        if selection:
-            pc.image_selection() # Note: if dsm and ortho are available as external file, they will be loaded in this
+        if load_images:
+            pc.get_existing_images()
+        elif selection:
+            pc.create_selection_of_images()  # Note: if dsm and ortho are available as external file, they will be loaded in this
             # process
         else:
-            pc.standard_images()
+            pc.create_standard_images()
 
     def on_tree_change(self):
         print('CHANGED!')

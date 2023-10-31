@@ -297,6 +297,28 @@ class NokPointCloud:
     def update_dirs(self):
         self.location_dir, self.file = os.path.split(self.path)
 
+    def create_data_folders(self, folder):
+        self.folder = folder
+        self.processed_data_dir = os.path.join(self.folder, 'processes')
+        self.img_dir = os.path.join(self.folder, 'images')
+
+        new_dir(self.folder)
+        new_dir(self.processed_data_dir)
+        new_dir(self.img_dir)
+
+        self.path_top = os.path.join(self.img_dir, 'top.tif')
+        self.path_right = os.path.join(self.img_dir, 'right.tif')
+        self.path_front = os.path.join(self.img_dir, 'front.tif')
+        self.path_back = os.path.join(self.img_dir, 'back.tif')
+        self.path_left = os.path.join(self.img_dir, 'left.tif')
+
+        self.path_pcv = os.path.join(self.img_dir, 'pcv.tif')
+        self.path_dtm = os.path.join(self.img_dir, 'dtm.tif')
+        self.path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
+        self.path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
+        self.path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
+        self.path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
+
     def do_preprocess(self):
 
         self.bound_pc_path = os.path.join(self.processed_data_dir, "pc_limits.ply")
@@ -343,23 +365,40 @@ class NokPointCloud:
 
 
     def recompute_elevation(self):
-        path_dtm = os.path.join(self.img_dir, 'dtm.tif')
-        path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
-        path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
-        path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
-        path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
-
         # process files
-        create_elevation(path_dtm, path_top_elevation, high_limit=self.high_point, low_limit=self.low_point, type='standard')
-        create_elevation(path_dtm, path_top_hillshade, high_limit=self.high_point, low_limit=self.low_point, type='hill')
+        create_elevation(self.path_dtm, self.path_pcv, high_limit=self.high_point, low_limit=self.low_point, type='pcv')
+        create_elevation(self.path_dtm, self.path_top_elevation, high_limit=self.high_point, low_limit=self.low_point, type='standard')
+        create_elevation(self.path_dtm, self.path_top_hillshade, high_limit=self.high_point, low_limit=self.low_point, type='hill')
 
-        create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
-                                     path_top_hybrid1, path_top_hybrid2)
+        create_mixed_elevation_views(self.path_top_elevation, self.path_top_hillshade, self.view_paths[0],
+                                     self.path_top_hybrid1, self.path_top_hybrid2)
 
     def create_height_distib(self):
         pass
+    def get_existing_images(self):
+        self.view_names.extend(
+            ['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
+        self.view_paths.extend(
+            [self.path_top, self.path_pcv, self.path_top_elevation, self.path_top_hillshade, self.path_top_hybrid1, self.path_top_hybrid2])
 
-    def image_selection(self):
+        # store height data
+        with rio.open(self.path_dtm) as src:
+            elevation = src.read(1)
+            # Set masked values to np.nan
+            elevation[elevation < 0] = np.nan
+            self.height_data = elevation
+            self.ground_data = copy.deepcopy(self.height_data)
+
+            # call height mod
+            dialog = dia.MySliderDemo(self.height_data)
+
+            if dialog.exec_():
+                self.low_point = dialog.slider_low.value()/10
+                self.high_point = dialog.slider_high.value()/10
+                print(self.low_point, self.high_point)
+                self.recompute_elevation()
+
+    def create_selection_of_images(self):
         if self.res == 0:
             self.res = round(self.density * 4, 3) * 1000
         elif self.dsm_file_path:
@@ -367,20 +406,10 @@ class NokPointCloud:
 
         print(f'the image resolution is {self.res}')
 
-        # create new path for dtm
-        path_top = os.path.join(self.img_dir, 'top.tif')
-        path_pcv = os.path.join(self.img_dir, 'pcv.tif')
-        path_dtm = os.path.join(self.img_dir, 'dtm.tif')
-        path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
-        path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
-        path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
-        path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
-
         self.view_names.extend(
             ['top', 'pcv', 'elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
         self.view_paths.extend(
-            [path_top, path_pcv, path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
-
+            [self.path_top, self.path_pcv, self.path_top_elevation, self.path_top_hillshade, self.path_top_hybrid1, self.path_top_hybrid2])
 
         if not self.dsm_file_path:
             raster_top_rgb_height(self.path, self.res / 1000)
@@ -389,15 +418,15 @@ class NokPointCloud:
             # relocate image file
             img_list = generate_list('.tif', self.location_dir)
             print(f'image list {img_list}')
-            os.rename(img_list[0], path_top)
-            os.rename(img_list[1], path_dtm)
+            os.rename(img_list[0], self.path_top)
+            os.rename(img_list[1], self.path_dtm)
         else:
             # relocate ODM files
-            os.rename(self.dsm_file_path, path_dtm)
-            os.rename(self.ortho_file_path, path_top)
+            os.rename(self.dsm_file_path, self.path_dtm)
+            os.rename(self.ortho_file_path, self.path_top)
 
         # store height data
-        with rio.open(path_dtm) as src:
+        with rio.open(self.path_dtm) as src:
             elevation = src.read(1)
             # Set masked values to np.nan
             elevation[elevation < 0] = np.nan
@@ -410,47 +439,41 @@ class NokPointCloud:
             if dialog.exec_():
                 self.low_point = dialog.slider_low.value()
                 self.high_point = dialog.slider_high.value()
+                self.recompute_elevation()
 
         # process files
-        create_elevation(path_dtm, path_pcv, type='pcv')
-        create_elevation(path_dtm, path_top_elevation, type='standard')
-        create_elevation(path_dtm, path_top_hillshade, type='hill')
+        create_elevation(self.path_dtm, self.path_pcv, type='pcv')
+        create_elevation(self.path_dtm, self.path_top_elevation, type='standard')
+        create_elevation(self.path_dtm, self.path_top_hillshade, type='hill')
 
-        create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
-                                     path_top_hybrid1, path_top_hybrid2)
+        create_mixed_elevation_views(self.path_top_elevation, self.path_top_hillshade, self.view_paths[0],
+                                     self.path_top_hybrid1, self.path_top_hybrid2)
 
     def reset_ground(self):
         pass
 
-    def standard_images(self):
+    def create_standard_images(self):
         self.res = round(self.density, 3) * 1000
         print(f'the image resolution is {self.res}')
         raster_all_bound(self.path, self.res / 1000, self.bound_pc_path, xray=False)
 
         # create new images paths
-        path_top = os.path.join(self.img_dir, 'top.tif')
-        path_right = os.path.join(self.img_dir, 'right.tif')
-        path_front = os.path.join(self.img_dir, 'front.tif')
-        path_front_after = os.path.join(self.img_dir, 'front2.tif')
-        path_back = os.path.join(self.img_dir, 'back.tif')
-        path_left = os.path.join(self.img_dir, 'left.tif')
-
         self.view_names.extend(['top', 'right', 'front', 'back', 'left'])
-        self.view_paths.extend([path_top, path_right, path_front, path_back, path_left])
+        self.view_paths.extend([self.path_top, self.path_right, self.path_front, self.path_back, self.path_left])
 
         # relocate image files
         img_list = generate_list('.tif', self.location_dir)
-        os.rename(img_list[0], path_right)
-        os.rename(img_list[1], path_back)
-        os.rename(img_list[2], path_top)
-        os.rename(img_list[3], path_left)
-        os.rename(img_list[4], path_front)
+        os.rename(img_list[0], self.path_right)
+        os.rename(img_list[1], self.path_back)
+        os.rename(img_list[2], self.path_top)
+        os.rename(img_list[3], self.path_left)
+        os.rename(img_list[4], self.path_front)
 
         # rotate right view (CloudCompare output is tilted by 90°)
         # read the images
-        im_front = Image.open(path_front)
-        im_back = Image.open(path_back)
-        im_left = Image.open(path_left)
+        im_front = Image.open(self.path_front)
+        im_back = Image.open(self.path_back)
+        im_left = Image.open(self.path_left)
 
         # rotate image by 90 degrees and mirror if needed
         angle = 90
@@ -459,120 +482,17 @@ class NokPointCloud:
         out_f = im_front.rotate(angle, expand=True)
         out_f_mir = ImageOps.mirror(out_f)
         im_front.close()
-        out_f_mir.save(path_front)
+        out_f_mir.save(self.path_front)
         # process back image
         out_b = im_back.rotate(angle, expand=True)
         im_back.close()
-        out_b.save(path_back)
+        out_b.save(self.path_back)
         # process left image
         out_l_mir = ImageOps.mirror(im_left)
         im_left.close()
-        out_l_mir.save(path_left)
+        out_l_mir.save(self.path_left)
 
         self.standard_im_done = True
-
-    def height_images(self):
-        if self.standard_im_done:
-            raster_single_bound_height(self.path, self.res / 1000, 2, self.bound_pc_path)
-
-            # create new path for dtm
-            path_dtm = os.path.join(self.img_dir, 'dtm.tif')
-            path_top_elevation = os.path.join(self.img_dir, 'elevation.png')
-            path_top_hillshade = os.path.join(self.img_dir, 'hillshade.png')
-            path_top_hybrid1 = os.path.join(self.img_dir, 'hybrid1.png')
-            path_top_hybrid2 = os.path.join(self.img_dir, 'hybrid2.png')
-
-            self.view_names.extend(['elevation', 'hillshade', 'hybrid (hillshade/elevation)', 'hybrid (elevation/rgb)'])
-            self.view_paths.extend([path_top_elevation, path_top_hillshade, path_top_hybrid1, path_top_hybrid2])
-
-            # relocate image file
-            img_list = generate_list('.tif', self.location_dir)
-            os.rename(img_list[0], path_dtm)
-
-            # store height data
-            with rio.open(path_dtm) as src:
-                elevation = src.read(1)
-                # Set masked values to np.nan
-                elevation[elevation < 0] = np.nan
-                self.height_data = elevation
-
-            # process files
-            create_elevation(path_dtm, path_top_elevation, type='standard')
-            create_elevation(path_dtm, path_top_hillshade, type='hill')
-
-            create_mixed_elevation_views(path_top_elevation, path_top_hillshade, self.view_paths[0],
-                                                 path_top_hybrid1, path_top_hybrid2)
-
-        else:
-            print('Process standard images first!')
-            pass
-
-    def planarity_images(self, orientation, span):
-        if self.ransac_done:
-            shutil.rmtree(self.ransac_cloud_folder)
-            shutil.rmtree(self.ransac_obj_folder)
-        self.do_ransac(min_factor=150)
-
-        # create pcv version of subsampled cloud
-        self.pcv_path = os.path.join(self.processed_data_dir, 'pcv.ply')
-        create_pcv(self.sub_pc_path)
-        sub_dir, _ = os.path.split(self.sub_pc_path)
-        find_substring_new_path('PCV', self.pcv_path, sub_dir)
-        # apply iso_transf
-        mat, inv_mat = iso1_mat()
-        cc_rotate_from_matrix(self.pcv_path, mat)
-        self.transf_pcv_path = find_substring('pcv_TRANSFORMED', self.processed_data_dir)
-
-        print('Launching planarity views creation...')
-        # create new directory for results
-        h_planes_img_dir = os.path.join(self.img_dir, 'horizontal_planes_views')
-        h_planes_pc_dir = os.path.join(self.processed_data_dir, 'horizontal_planes_pc')
-        new_dir(h_planes_img_dir)
-        new_dir(h_planes_pc_dir)
-
-        # create a list of detected planes
-        plane_list = generate_list('obj', self.ransac_obj_folder, exclude='merged')
-
-        # find horizontal planes
-        hor_planes = find_planes(plane_list, self.ransac_cloud_folder, orientation=orientation,
-                                         size_absolute='area_greater_than')
-        hor_planes_loc = hor_planes[2]
-
-        # create new_clouds from the detected planes (the original point cloud is segmented around the plane)
-        n_h_elements = cc_planes_to_build_dist_list(self.path, hor_planes_loc, h_planes_pc_dir, span=span)
-
-        # computing the properties for each new point cloud --> Useful to place the images on the entire point cloud
-        new_pc_list = generate_list('.las', h_planes_pc_dir)
-        # TODO: continue here
-
-        # rendering each element
-        list_h_planes_pc = generate_list('.las', h_planes_pc_dir)
-        for cloud in list_h_planes_pc:
-            render_planar_segment(cloud, self.res / 1000)
-
-            # visual location
-            #   rotate plane
-            cc_rotate_from_matrix(cloud, mat)
-            plane_rotated_path = find_substring('TRANSFORMED', h_planes_pc_dir)
-            render_plane_in_cloud(plane_rotated_path, self.transf_pcv_path, self.res / 1000)
-
-        i = 0
-        for file in os.listdir(self.processed_data_dir):
-            if file.endswith('.tif'):
-                new_file = f'location_plane{i + 1}'
-                os.rename(os.path.join(self.processed_data_dir, file), os.path.join(h_planes_img_dir, new_file))
-                i += 1
-        j = 0
-        for file in os.listdir(h_planes_pc_dir):
-            if file.endswith('.tif'):
-                new_file = f'planarity{j + 1}'
-                os.rename(os.path.join(h_planes_pc_dir, file), os.path.join(h_planes_img_dir, new_file))
-                j += 1
-
-        # add renders to list
-        for img in os.listdir(h_planes_img_dir):
-            self.view_names.append(img)
-            self.view_paths.append(os.path.join(h_planes_img_dir, img))
 
     def do_orient(self):
         R = preproc_align_cloud(self.path, self.ransac_obj_folder, self.ransac_cloud_folder)
@@ -2167,10 +2087,10 @@ def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='stand
 
     # filter values
     if low_limit != 0:
-        elevation[elevation <= low_limit] = low_limit
+        elevation[elevation <= low_limit] = np.nan
 
     if low_limit != 0:
-        elevation[elevation >= high_limit] = high_limit
+        elevation[elevation >= high_limit] = np.nan
 
     # interpolation
 
