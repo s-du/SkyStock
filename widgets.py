@@ -1063,3 +1063,94 @@ class TestListView(QListWidget):
             self.dropped.emit(links)
         else:
             event.ignore()
+
+def numpy_array_to_qpixmap(arr):
+    height, width = arr.shape[:2]
+
+    arr_rgb = np.ascontiguousarray(arr[..., ::-1])  # Convert BGR to RGB and ensure C-contiguity
+    qimg = QImage(arr_rgb.data, width, height, arr_rgb.strides[0], QImage.Format_RGB888)
+
+    return QPixmap.fromImage(qimg)
+
+
+class PhotoViewerBasic(QGraphicsView):
+    def __init__(self, parent):
+        super(PhotoViewerBasic, self).__init__(parent)
+        self._zoom = 0
+        self._empty = True
+        self._scene = QGraphicsScene(self)
+        self._photo = QGraphicsPixmapItem()
+        self._scene.addItem(self._photo)
+        self.setScene(self._scene)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setBackgroundBrush(QBrush(QColor(255, 255, 255)))
+        self.setFrameShape(QFrame.NoFrame)
+
+        self.setMinimumSize(400, 600)
+
+        self.setMouseTracking(True)
+        self.origin = QPoint()
+
+    def has_photo(self):
+        return not self._empty
+
+    def showEvent(self, event):
+        self.fitInView()
+        super(PhotoViewerBasic, self).showEvent(event)
+
+    def fitInView(self, scale=True):
+        rect = QRectF(self._photo.pixmap().rect())
+        print(rect)
+        if not rect.isNull():
+            self.setSceneRect(rect)
+            if self.has_photo():
+                unity = self.transform().mapRect(QRectF(0, 0, 1, 1))
+                print('unity: ', unity)
+                self.scale(1 / unity.width(), 1 / unity.height())
+                viewrect = self.viewport().rect()
+                print('view: ', viewrect)
+                scenerect = self.transform().mapRect(rect)
+                print('scene: ', viewrect)
+                factor = min(viewrect.width() / scenerect.width(),
+                             viewrect.height() / scenerect.height())
+                self.scale(factor, factor)
+            self._zoom = 0
+
+    def setPhoto(self, pixmap=None):
+        self._zoom = 0
+        if pixmap and not pixmap.isNull():
+            self._empty = False
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+            self._photo.setPixmap(pixmap)
+        else:
+            self._empty = True
+            self.setDragMode(QGraphicsView.NoDrag)
+            self._photo.setPixmap(QPixmap())
+        self.fitInView()
+
+    def toggleDragMode(self):
+        if self.dragMode() == QGraphicsView.ScrollHandDrag:
+            self.setDragMode(QGraphicsView.NoDrag)
+        elif not self._photo.pixmap().isNull():
+            self.setDragMode(QGraphicsView.ScrollHandDrag)
+
+
+    # mouse events
+    def wheelEvent(self, event):
+        print(self._zoom)
+        if self.has_photo():
+            if event.angleDelta().y() > 0:
+                factor = 1.25
+                self._zoom += 1
+            else:
+                factor = 0.8
+                self._zoom -= 1
+            if self._zoom > 0:
+                self.scale(factor, factor)
+            elif self._zoom == 0:
+                self.fitInView()
+            else:
+                self._zoom = 0

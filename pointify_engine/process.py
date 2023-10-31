@@ -23,6 +23,7 @@ from scipy.spatial import Delaunay
 from blend_modes import multiply, hard_light
 import resources as res
 from pointify_engine import simplepcv as spcv
+from pointify_engine import hillshade as hill
 
 # PARAMETERS
 CC_PATH = os.path.join("C:\\", "Program Files", "CloudCompare", "CloudCompare")  # path to cloudcompare exe
@@ -401,6 +402,7 @@ class NokPointCloud:
                 self.high_point = dialog.slider_high.value()/10
                 print(self.low_point, self.high_point)
                 self.recompute_elevation()
+
 
     def create_selection_of_images(self):
         if self.res == 0:
@@ -2077,6 +2079,16 @@ def create_mixed_elevation_views(elevation_path, hillshade_path, rgb_path, dest_
     blended_img_raw = blended_img_raw.convert('RGB')
     blended_img_raw.save(dest_path2)
 
+def create_custom_hillshade(elevation):
+    hillshade_values = hill.optimized_compute_hillshade_for_grid(elevation)
+    dialog = dia.HillshadeCustomizer(hillshade_values, elevation)
+
+    if dialog.exec_():
+        print('ok')
+
+    result = dialog.pix
+
+    return result
 
 def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='standard'):
     """
@@ -2098,16 +2110,14 @@ def create_elevation(dtm_path, dest_path, high_limit=0, low_limit=0, type='stand
     if low_limit != 0:
         elevation[elevation >= high_limit] = np.nan
 
-    # interpolation
-
-
     # Plot the altitude data with the colormap
     if type =='standard':
         cmap = plt.get_cmap("terrain")
         plt.imsave(fname=dest_path, arr=elevation, cmap=cmap, vmin=np.nanmin(elevation), vmax=np.nanmax(elevation))
     elif type == 'hill':
-        hillshade = es.hillshade(elevation, altitude=0)
-        plt.imsave(fname=dest_path, arr=hillshade, cmap='Greys', vmin=np.nanmin(hillshade), vmax=np.nanmax(hillshade))
+        hillshade = create_custom_hillshade(elevation)
+        plt.imsave(fname=dest_path, arr=hillshade)
+
     elif type == 'pcv':
         visibility = spcv.compute_sky_visibility(elevation)
         result = spcv.export_results(visibility, -1,1, 2,0.2,standardize=False)

@@ -6,6 +6,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
+from pointify_engine import hillshade as hill
 
 
 class MyCanvas(FigureCanvas):
@@ -351,3 +352,142 @@ class AboutDialog(QtWidgets.QDialog):
         self.layout.addWidget(logos2, alignment=QtCore.Qt.AlignCenter)
 
         self.setLayout(self.layout)
+
+
+class HillshadeCustomizer(QtWidgets.QDialog):
+    def __init__(self, image, height):
+        super().__init__()
+
+        # load the ui
+        basepath = os.path.dirname(__file__)
+        basename = 'hillshade'
+        uifile = os.path.join(basepath, 'ui/%s.ui' % basename)
+        print(uifile)
+        wid.loadUi(uifile, self)
+
+        self.setWindowTitle('Create Hillshade Renders')
+
+        self.image = image
+        self.height = height
+
+        self.altitude = 45
+        self.azimuth = 315
+
+        self.comboBox.addItems(['Red', 'Green', 'Blue'])
+
+        # add viewer
+        self.viewer = wid.PhotoViewerBasic(self)
+        self.horizontalLayout_2.addWidget(self.viewer)
+
+        # Create the sliders and their labels
+        self.slider_min.setMinimum(int(np.nanmin(self.image)))
+        self.slider_min.setMaximum(int(np.nanmax(self.image)))
+        self.slider_min.setValue(int(np.nanmin(self.image)))
+        self.slider_min.valueChanged.connect(self.update_image)
+
+        self.slider_max.setMinimum(int(np.nanmin(self.image)))
+        self.slider_max.setMaximum(int(np.nanmax(self.image)))
+        self.slider_min.setValue(int(np.nanmax(self.image)))
+        self.slider_max.valueChanged.connect(self.update_image)
+
+        self.slider_alti.setMinimum(0)
+        self.slider_alti.setMaximum(90)
+        self.slider_alti.setValue(45)
+        self.slider_alti.valueChanged.connect(self.update_hillshade)
+
+        self.slider_azi.setMinimum(0)
+        self.slider_azi.setMaximum(360)
+        self.slider_azi.setValue(315)
+        self.slider_azi.valueChanged.connect(self.update_hillshade)
+
+        self.dial.valueChanged.connect(self.update_image)
+        self.comboBox.currentIndexChanged.connect(self.update_image)
+
+        # normalize checkbox
+        self.checkBox.clicked.connect(self.update_image)
+
+        self.sliders = {
+            'min': self.findChild(QtWidgets.QSlider, 'slider_min'),
+            'max': self.findChild(QtWidgets.QSlider, 'slider_max'),
+            'alti': self.findChild(QtWidgets.QSlider, 'slider_alti'),
+            'azi': self.findChild(QtWidgets.QSlider, 'slider_azi')
+        }
+
+        self.line_edits = {
+            'min': self.findChild(QtWidgets.QLineEdit, 'lineEdit_min'),
+            'max': self.findChild(QtWidgets.QLineEdit, 'lineEdit_max'),
+            'alti': self.findChild(QtWidgets.QLineEdit, 'lineEdit_alti'),
+            'azi': self.findChild(QtWidgets.QLineEdit, 'lineEdit_azi')
+        }
+
+        # Define the valid ranges for each slider
+        self.slider_ranges = {
+            'min': (0, 255),
+            'max': (0, 255),
+            'alti': (0, 90),
+            'azi': (0, 360)
+        }
+
+        # Connect the signals and slots
+        for name, slider in self.sliders.items():
+            slider.valueChanged.connect(lambda value, name=name: self.update_line_edit(value, name))
+            self.line_edits[name].editingFinished.connect(lambda name=name: self.update_slider_from_line_edit(name))
+
+        # Compute gradient
+        gradient_y, gradient_x = np.gradient(image)
+        self.magnitude = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
+        self.threshold = np.percentile(self.magnitude, 85)
+        self.max_gradient_zones = self.magnitude > self.threshold
+
+        self.update_hillshade()
+        self.update_image()
+
+        # button actions
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+    def update_line_edit(self, value, name):
+        self.line_edits[name].setText(str(value))
+
+    def update_min_max(self):
+        # Create the sliders and their labels
+        self.slider_min.setMinimum(int(np.nanmin(self.image)))
+        self.slider_min.setMaximum(int(np.nanmax(self.image)))
+        self.slider_min.setValue(int(np.nanmin(self.image)))
+        self.slider_min.valueChanged.connect(self.update_image)
+
+        self.slider_max.setMinimum(int(np.nanmin(self.image)))
+        self.slider_max.setMaximum(int(np.nanmax(self.image)))
+        self.slider_max.setValue(int(np.nanmax(self.image)))
+        self.slider_max.valueChanged.connect(self.update_image)
+
+    def update_hillshade(self):
+        self.altitude = self.slider_alti.value()
+        self.azimuth = self.slider_azi.value()
+        self.image = hill.optimized_compute_hillshade_for_grid(self.height, altitude=self.altitude, azimuth=self.azimuth)
+        self.update_min_max()
+        self.update_image()
+
+
+    def update_slider_from_line_edit(self, name):
+        text = self.line_edits[name].text()
+        min_val, max_val = self.slider_ranges[name]
+        if text.isdigit():
+            value = int(text)
+            if min_val <= value <= max_val:
+                self.sliders[name].setValue(value)
+            else:
+                # If the value is out of range, reset the line edit to the slider's current value
+                self.line_edits[name].setText(str(self.sliders[name].value()))
+
+    def update_image(self):
+        # Get the min and max values from the sliders and rescale them
+        vmin = self.slider_min.value()
+        vmax = self.slider_max.value()
+        color_factor = self.dial.value() / 100
+        color_choice = self.comboBox.currentIndex()
+
+        eq = self.checkBox.isChecked()
+
+        self.pix = hill.export_results(self.image, vmin, vmax, color_choice,color_factor, equalize = eq)
+        self.viewer.setPhoto(wid.numpy_array_to_qpixmap(self.pix))
