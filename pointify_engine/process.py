@@ -1845,11 +1845,11 @@ def create_pc_from_elevation_coords(elevation, rgb_path, coords, res):
     rgb_inside_polygon = rgb[mask]
 
     # 4. Create the XYZ point cloud
-    x_coords, y_coords = np.where(mask)
+    y_coords, x_coords = np.where(mask)
 
     # Convert pixel coordinates to meters
     x_coords_meters = x_coords * res
-    y_coords_meters = y_coords * res
+    y_coords_meters = (elevation.shape[0] - y_coords) * res
 
     xyz_points = np.column_stack((x_coords_meters, y_coords_meters, heights_inside_polygon))
     color_array = rgb_inside_polygon

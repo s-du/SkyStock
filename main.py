@@ -871,6 +871,8 @@ class SkyStock(QtWidgets.QMainWindow):
         else:
             pc.create_standard_images()
 
+        self.update_progress(nb=100, text='Ready...')
+
 
     def toggle_top_view_functions(self, enable):
         if enable:

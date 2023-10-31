@@ -990,7 +990,6 @@ class PhotoViewer(QGraphicsView):
 
             self.origin = QPoint()
             self._current_line_item = None
-            self.toggleDragMode()
 
         super(PhotoViewer, self).mouseReleaseEvent(event)
 
