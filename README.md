@@ -13,6 +13,9 @@ SkyStock is a Pyside6 application for extracting stock piles from point clouds.
     GUI for stock piles segmentation
 </p>
 
+[Demo video here](https://www.youtube.com/watch?v=MebI2tRt5LY)
+
+
 
 ## Principle
 The application is based on "Segment Anything" image segmentation, and then projects the 2D segmented area onto the 3D data.
